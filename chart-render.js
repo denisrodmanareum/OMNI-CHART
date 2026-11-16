@@ -151,4 +151,3 @@ function renderLegend(time) {
   $("legend").innerHTML = `${state.data.symbol} · ${state.data.timeframe} · ${"USDT 무기한"} &nbsp; 시 <b>${fmt(b.o)}</b> 고 <b>${fmt(b.h)}</b> 저 <b>${fmt(b.l)}</b> 종 <b class="${cls}">${fmt(b.c)}</b> <span class="${cls}">${sgn(chg)}%</span> · ${kst(b.t)}`;
 }
 chart.subscribeCrosshairMove(p => renderLegend(p && p.time != null ? p.time : null));
-
