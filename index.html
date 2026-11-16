@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OMNI 차트</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #131722; --panel2: #171c28; --line: #232838; --text: #d1d4dc; --muted: #7d8394;
+    --long: #14b8a6; --short: #ef4444; --sq: #a855f7; --gold: #eab308; --orange: #f97316; --lime: #84cc16; --blue: #38bdf8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); position: relative; z-index: 5; }
+  header strong { font-size: 16px; letter-spacing: .5px; margin-right: 4px; }
+  input, select, button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font: inherit; }
+  #sym { width: 120px; text-transform: uppercase; }
+  button { cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: #3b4256; }
+  button.on, button.active { background: #1e2433; border-color: #3b4256; color: #fff; }
+  button.armed { border-color: var(--gold); color: var(--gold); }
+  .group { display: flex; gap: 2px; }
+  details { position: relative; }
+  details summary { list-style: none; cursor: pointer; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; }
+  details summary::-webkit-details-marker { display: none; }
+  details[open] summary { border-color: #3b4256; }
+  .menu { position: absolute; top: 38px; left: 0; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; display: grid; grid-template-columns: repeat(2, max-content); gap: 6px 18px; z-index: 10; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  .menu label { display: flex; gap: 6px; align-items: center; cursor: pointer; white-space: nowrap; }
+  .menu input { margin: 0; padding: 0; }
+  #status { margin-left: auto; color: var(--muted); font-size: 13px; }
+  #status.live::before { content: "●"; color: var(--long); margin-right: 4px; }
+  #status.err { color: var(--short); }
+  main { display: grid; grid-template-columns: 1fr 350px; height: calc(100vh - 51px); }
+  #wrap { position: relative; min-height: 420px; }
+  #chart { position: absolute; inset: 0; }
+  #legend { position: absolute; top: 6px; left: 10px; z-index: 3; font-size: 12.5px; pointer-events: none; color: var(--muted); }
+  #legend b { color: var(--text); font-weight: 500; }
+  #hint { position: absolute; top: 28px; left: 10px; z-index: 3; font-size: 12.5px; color: var(--gold); pointer-events: none; }
+  aside { border-left: 1px solid var(--line); overflow-y: auto; padding: 12px 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+  .card h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .3px; display: flex; justify-content: space-between; }
+  .row { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+  .row > span:first-child { color: var(--muted); white-space: nowrap; }
+  .row > span:last-child { text-align: right; }
+  .big { font-size: 22px; font-weight: 600; }
+  .L { color: var(--long); } .S { color: var(--short); } .muted { color: var(--muted); } .warn { color: var(--orange); }
+  .risk { color: var(--short); } .reward { color: var(--lime); }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  td { padding: 4px 2px; border-top: 1px solid var(--line); }
+  tr.pick { cursor: pointer; } tr.pick:hover td { background: #1a1f2c; }
+  tr.cur td { background: #1a2130; }
+  .note { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  .x { background: none; border: 0; color: var(--muted); padding: 0 4px; }
+  .x:hover { color: var(--short); }
+  .inline { display: flex; gap: 6px; margin-top: 6px; }
+  .inline input { width: 100%; }
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; height: auto; }
+    #wrap { height: 62vh; }
+    aside { border-left: 0; border-top: 1px solid var(--line); }
+    .menu { grid-template-columns: max-content; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <strong>OMNI</strong>
+  <input id="sym" list="symlist" value="BTCUSDT" aria-label="심볼">
+  <datalist id="symlist"><option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option><option>BNBUSDT</option><option>DOGEUSDT</option><option>ADAUSDT</option><option>LINKUSDT</option></datalist>
+  <button id="star" title="관심 종목에 추가/제거">☆</button>
+  <span class="group" id="tf">
+    <button data-tf="15m">15분</button><button data-tf="1h">1시간</button><button data-tf="4h">4시간</button><button data-tf="1d">일봉</button><button data-tf="1w">주봉</button>
+  </span>
+  <details id="layerMenu"><summary>레이어 ▾</summary>
+    <div class="menu" id="layers">
+      <label><input type="checkbox" data-layer="signals">L/S 신호</label>
+      <label><input type="checkbox" data-layer="plans">손절·익절</label>
+      <label><input type="checkbox" data-layer="sq">SQ</label>
+      <label><input type="checkbox" data-layer="trend">장기 추세선</label>
+      <label><input type="checkbox" data-layer="shortTrend">단기 추세선</label>
+      <label><input type="checkbox" data-layer="levels">상위 레벨</label>
+      <label><input type="checkbox" data-layer="sr">지지·저항</label>
+      <label><input type="checkbox" data-layer="fib">피보나치</label>
+      <label><input type="checkbox" data-layer="zone">반등 후보</label>
+      <label><input type="checkbox" data-layer="ema20">EMA 20</label>
+      <label><input type="checkbox" data-layer="ema50">EMA 50</label>
+      <label><input type="checkbox" data-layer="ema200">EMA 200</label>
+      <label><input type="checkbox" data-layer="volume">거래량</label>
+      <label><input type="checkbox" data-layer="mine">내 수평선</label>
+    </div>
+  </details>
+  <button id="drawLine" title="차트를 클릭한 가격에 수평선을 긋습니다">수평선</button>
+  <button id="drawAlert" title="차트를 클릭한 가격에 알림을 겁니다">가격 알림</button>
+  <button id="notify">알림 켜기</button>
+  <span id="status">불러오는 중…</span>
+</header>
+<main>
+  <div id="wrap"><div id="chart"></div><div id="legend"></div><div id="hint"></div></div>
+  <aside id="panel"><div class="card muted">불러오는 중…</div></aside>
+</main>
+
+<script>
+"use strict";
+// 신호 규칙은 omni_long_short.pine과 같다: 마감된 일봉·4H 값만 쓰고, 다음 봉 시가 기준으로 계획을 세운다.
+const H = 3600e3, H4 = 4 * H, DAY = 24 * H, HOLD = 72 * H, MAX_STOP = 10, KST = 9 * 3600;
+const TF_SEC = { "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800 };
+const SR_PRD = { "15m": 8, "1h": 10, "4h": 12, "1d": 15, "1w": 15 };
+const WATCH_DEFAULT = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT", "DOGEUSDT"];
+const LAYER_DEFAULT = { signals: true, plans: true, sq: true, trend: true, shortTrend: true, levels: true, sr: true, fib: true, zone: true, ema20: false, ema50: false, ema200: true, volume: true, mine: true };
+const $ = id => document.getElementById(id);
+const sec = t => Math.floor(t / 1000) + KST; // 차트 시간축을 한국시간으로 보이게 옮긴다
+// 소수 자릿수는 가격 크기에 맞춘다(0.0000037 같은 밈코인도 유효숫자 4자리 유지).
+const digits = v => { const a = Math.abs(v); return a >= 1000 ? 1 : a >= 1 ? 3 : Math.min(10, Math.ceil(-Math.log10(a)) + 3); };
+const fmt = v => v == null || !isFinite(v) ? "-" : v.toLocaleString("en-US", { maximumFractionDigits: digits(v) });
+const pct = (p, ref) => (p / ref - 1) * 100;
+const sgn = v => (v >= 0 ? "+" : "") + v.toFixed(2);
+const kst = t => new Date(t + KST * 1000).toISOString().slice(5, 16).replace("T", " ");
+const store = {
+  get(k, fallback = null) { try { const v = localStorage.getItem(k); return v == null ? fallback : JSON.parse(v); } catch { return fallback; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+
+const state = {
+  sym: store.get("omni-sym", "BTCUSDT"), tf: store.get("omni-tf", "4h"), layers: { ...LAYER_DEFAULT, ...store.get("omni-layers", {}) },
+  ws: null, timer: null, src: "fapi", mode: null, lastPrice: null, watch: [],
+};
+
+// ---------- 시세 ----------
+async function klines(sym, interval, limit = 1500, track = true) {
+  const sources = [
+    ["fapi", `https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=${interval}&limit=${limit}`],
+    ["spot", `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${interval}&limit=${Math.min(limit, 1000)}`],
+  ];
+  for (const [name, url] of sources) {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) continue;
+      const rows = await r.json();
+      if (track) state.src = name;
+      return rows.map(k => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5], ct: k[6] }));
+    } catch (e) { /* 다음 경로 시도 */ }
+  }
+  throw new Error(`${sym} ${interval} 시세를 불러오지 못했습니다`);
+}
+
+// ---------- 지표 ----------
+function wilderAtr(b, n) {
+  const out = new Array(b.length).fill(null);
+  const tr = i => Math.max(b[i].h - b[i].l, Math.abs(b[i].h - b[i - 1].c), Math.abs(b[i].l - b[i - 1].c));
+  let v = null;
+  for (let i = 1; i < b.length; i++) {
+    if (i === n) { v = 0; for (let k = 1; k <= n; k++) v += tr(k); v /= n; }
+    else if (i > n) v = (v * (n - 1) + tr(i)) / n;
+    out[i] = v;
+  }
+  return out;
+}
+function ema(b, n) { const k = 2 / (n + 1); let v = null; return b.map(x => (v = v == null ? x.c : x.c * k + v * (1 - k))); }
+const stopPct = (atr, close) => Math.max(0.7, 2 * atr / close * 100);
+
+function dailySignals(d) {
+  const atr = wilderAtr(d, 14), out = [], sides = [];
+  let prev = 0;
+  for (let i = 0; i < d.length; i++) {
+    let s = 0;
+    if (i >= 30) {
+      const r7 = d[i].c / d[i - 7].c - 1, r30 = d[i].c / d[i - 30].c - 1;
+      s = r7 > 0 && r30 > 0 ? 1 : r7 < 0 && r30 < 0 ? -1 : 0;
+    }
+    sides.push(s);
+    if (s && s !== prev && atr[i]) {
+      const stop = stopPct(atr[i], d[i].c);
+      if (stop <= MAX_STOP) out.push({ t: d[i].t + DAY, dir: s, stop, mod: "일봉" });
+    }
+    prev = s;
+  }
+  return { out, sides, stopNow: atr.at(-1) ? stopPct(atr.at(-1), d.at(-1).c) : null };
+}
+
+function ichiSignals(h4) {
+  const atr = wilderAtr(h4, 14), out = [];
+  const mid = (i, n) => { let hi = -Infinity, lo = Infinity; for (let k = i - n + 1; k <= i; k++) { hi = Math.max(hi, h4[k].h); lo = Math.min(lo, h4[k].l); } return (hi + lo) / 2; };
+  let prev = 0, side = 0;
+  for (let i = 25; i < h4.length; i++) {
+    const tk = mid(i, 9), kj = mid(i, 26);
+    side = tk > kj ? 1 : tk < kj ? -1 : 0;
+    if (side && side !== prev && atr[i]) {
+      const stop = stopPct(atr[i], h4[i].c);
+      if (stop <= MAX_STOP) out.push({ t: h4[i].t + H4, dir: side, stop, mod: "4H" });
+    }
+    prev = side;
+  }
+  return { out, side, stopNow: atr.at(-1) ? stopPct(atr.at(-1), h4.at(-1).c) : null };
+}
+
+// 같은 시각에 일봉과 4H가 반대면 둘 다 버린다(WAIT).
+function combine(daily, ichi) {
+  const byT = new Map();
+  for (const s of [...daily, ...ichi]) (byT.get(s.t) || byT.set(s.t, []).get(s.t)).push(s);
+  const out = [];
+  for (const group of byT.values()) {
+    if (group.length === 2 && group[0].dir !== group[1].dir) continue;
+    out.push(...group);
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+// 계획 결과: 시가에 만료·교체, 봉 마감에 손절 우선 판정. 손절 -1R, 익절 +2R, 만료·교체는 그 시가 기준 R.
+function runPlan(sig, h4, nextT, now) {
+  let k = h4.findIndex(b => b.t >= sig.t);
+  if (k < 0) return { ...sig, state: "대기" };
+  const ref = h4[k].o, sl = ref * (1 - sig.dir * sig.stop / 100), tp = ref * (1 + sig.dir * 2 * sig.stop / 100);
+  const risk = Math.abs(ref - sl);
+  const plan = { ...sig, ref, sl, tp };
+  for (; k < h4.length; k++) {
+    const b = h4[k];
+    if (b.t >= nextT) return { ...plan, state: "교체", end: b.t, r: sig.dir * (b.o - ref) / risk };
+    if (b.t - sig.t >= HOLD) return { ...plan, state: "만료", end: b.t, r: sig.dir * (b.o - ref) / risk };
+    if (b.ct >= now) break;
+    const hitSl = sig.dir === 1 ? b.l <= sl : b.h >= sl;
+    const hitTp = sig.dir === 1 ? b.h >= tp : b.l <= tp;
+    if (hitSl) return { ...plan, state: "손절", end: b.t, r: -1 };
+    if (hitTp) return { ...plan, state: "익절", end: b.t, r: 2 };
+  }
+  return { ...plan, state: now - sig.t >= HOLD ? "만료" : "진행" };
+}
+
+function squeeze(h4) {
+  const atr = wilderAtr(h4, 20), events = [];
+  let prevPressed = false, on = false, basis = null, pressed = false;
+  for (let i = 19; i < h4.length; i++) {
+    let sum = 0; for (let k = i - 19; k <= i; k++) sum += h4[k].c;
+    basis = sum / 20;
+    let v = 0; for (let k = i - 19; k <= i; k++) v += (h4[k].c - basis) ** 2;
+    pressed = atr[i] != null && 2 * Math.sqrt(v / 20) < 1.5 * atr[i];
+    const fire = prevPressed && !pressed && h4[i].c > basis;
+    if (on && h4[i].c <= basis) { events.push({ t: h4[i].t + H4, type: "exit" }); on = false; }
+    if (fire && !on) { events.push({ t: h4[i].t + H4, type: "entry" }); on = true; }
+    prevPressed = pressed;
+  }
+  return { events, on, basis, pressed };
+}
+
+// 장기 추세선: 일봉 좌우 len개 피벗, 낮아지는 고점 2개 = 저항, 높아지는 저점 2개 = 지지. 일봉 종가로 이탈 판정.
+function longTrend(d, len, falling) {
+  let lastP = null, lastT = null, p1 = null, t1 = null, p2 = null, t2 = null, broken = false, breakT = null;
+  for (let i = 0; i < d.length; i++) {
+    const j = i - len;
+    if (j >= len) {
+      const v = falling ? d[j].h : d[j].l;
+      let pivot = true;
+      for (let k = j - len; k <= j + len && pivot; k++) {
+        if (k === j) continue;
+        const w = falling ? d[k].h : d[k].l;
+        if (falling ? w >= v : w <= v) pivot = false;
+      }
+      if (pivot) {
+        if (lastP != null && (falling ? v < lastP : v > lastP)) { p1 = lastP; t1 = lastT; p2 = v; t2 = d[j].t; broken = false; breakT = null; }
+        lastP = v; lastT = d[j].t;
+      }
+    }
+    if (p2 != null && !broken) {
+      const at = p2 + (p2 - p1) / (t2 - t1) * (d[i].t - t2);
+      if (falling ? d[i].c > at : d[i].c < at) { broken = true; breakT = d[i].t; }
+    }
+  }
+  return p2 == null ? null : { p1, t1, p2, t2, broken, breakT, at: t => p2 + (p2 - p1) / (t2 - t1) * (t - t2) };
+}
+
+function weekly(d) {
+  const out = [];
+  for (const b of d) {
+    const wk = Math.floor((b.t - 4 * DAY) / (7 * DAY)); // 월요일 00:00 UTC 시작
+    const last = out.at(-1);
+    if (last && last.wk === wk) { last.h = Math.max(last.h, b.h); last.l = Math.min(last.l, b.l); last.c = b.c; last.ct = b.ct; }
+    else out.push({ wk, t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, ct: b.ct });
+  }
+  return out;
+}
+
+// 마감된 봉의 최근 피벗 2개(좌우 2봉)와 52봉 고저.
+function levelsOf(bars, label) {
+  const out = [], highs = [], lows = [];
+  for (let j = 2; j < bars.length - 2; j++) {
+    const b = bars[j];
+    if (b.h > bars[j - 1].h && b.h > bars[j - 2].h && b.h >= bars[j + 1].h && b.h >= bars[j + 2].h) highs.push(b.h);
+    if (b.l < bars[j - 1].l && b.l < bars[j - 2].l && b.l <= bars[j + 1].l && b.l <= bars[j + 2].l) lows.push(b.l);
+  }
+  const recent = bars.slice(-52);
+  if (!recent.length) return out;
+  for (const p of [...highs.slice(-2), ...lows.slice(-2), Math.max(...recent.map(b => b.h)), Math.min(...recent.map(b => b.l))]) out.push({ p, label });
+  return out;
+}
+
+function nearest(levels, px) {
+  let res = null, sup = null;
+  for (const lv of levels) {
+    if (lv.p > px && (!res || lv.p <= res.p)) res = lv;
+    if (lv.p < px && (!sup || lv.p >= sup.p)) sup = lv;
+  }
+  return { res, sup };
+}
+
+function runLength(sides) {
+  const runs = { 1: [], "-1": [] };
+  let cur = 0, n = 0;
+  for (const s of sides) {
+    if (s === cur) n++;
+    else { if (cur) runs[cur].push(n); cur = s; n = 1; }
+  }
+  const past = cur ? runs[cur] : [];
+  return { cur, n, total: past.length, longer: past.filter(x => x >= n).length };
+}
+
+function analyze(h4all, d1all, now) {
+  const h4 = h4all.filter(b => b.ct < now), d1 = d1all.filter(b => b.ct < now);
+  const ds = dailySignals(d1), is = ichiSignals(h4);
+  const signals = combine(ds.out, is.out);
+  const plans = signals.map((s, i) => {
+    const next = signals.slice(i + 1).find(x => x.mod === s.mod);
+    return runPlan(s, h4all, next ? next.t : Infinity, now);
+  });
+  const last = mod => [...plans].reverse().find(p => p.mod === mod) || null;
+  const lv = [...levelsOf(d1, "1D"), ...levelsOf(weekly(d1).filter(w => w.ct < now), "1W")];
+  return {
+    plans, dailyPlan: last("일봉"), ichiPlan: last("4H"), sq: squeeze(h4),
+    trendSup: longTrend(d1, 20, false), trendRes: longTrend(d1, 20, true),
+    levels: lv, dailySide: ds.sides.at(-1) || 0, ichiSide: is.side, run: runLength(ds.sides),
+    stopDaily: ds.stopNow, stopIchi: is.stopNow,
+  };
+}
+
+// ---------- 현재 차트 주기의 구조 (Pine과 같은 규칙) ----------
+// 지지·저항: 좌우 prd봉 확정 피벗, 0.5 ATR 안이면 평균으로 합치고 최근 4개만 유지.
+function localLevels(cb, prd, atr) {
+  const levels = [];
+  const add = (p, t, tol) => {
+    const hit = levels.find(lv => Math.abs(lv.p - p) <= tol);
+    if (hit) { hit.p = (hit.p * hit.touches + p) / (hit.touches + 1); hit.touches++; hit.t = Math.min(hit.t, t); }
+    else { levels.unshift({ p, touches: 1, t }); if (levels.length > 4) levels.pop(); }
+  };
+  for (let i = 2 * prd; i < cb.length; i++) {
+    const j = i - prd, tol = (atr[i] || 0) * 0.5;
+    let isHigh = true, isLow = true;
+    for (let k = j - prd; k <= j + prd; k++) {
+      if (k === j) continue;
+      if (cb[k].h >= cb[j].h) isHigh = false;
+      if (cb[k].l <= cb[j].l) isLow = false;
+    }
+    if (isHigh) add(cb[j].h, cb[i].t, tol);
+    if (isLow) add(cb[j].l, cb[i].t, tol);
+  }
+  return levels;
+}
+
+// 피보나치: 좌우 5봉 확정 고점·저점 쌍. 나중에 확정된 쪽이 방향을 정한다.
+function fibAnchors(cb, len = 5) {
+  let lastHigh = null, lastLow = null, highT = null, lowT = null, anchor = null;
+  for (let i = 2 * len; i < cb.length; i++) {
+    const j = i - len;
+    let isHigh = true, isLow = true;
+    for (let k = j - len; k <= j + len; k++) {
+      if (k === j) continue;
+      if (cb[k].h >= cb[j].h) isHigh = false;
+      if (cb[k].l <= cb[j].l) isLow = false;
+    }
+    if (isHigh) { lastHigh = cb[j].h; highT = cb[j].t; }
+    if (isLow) { lastLow = cb[j].l; lowT = cb[j].t; }
+    if (isHigh && lowT != null && highT > lowT && lastHigh > lastLow) anchor = { hi: lastHigh, lo: lastLow, up: true, start: lowT };
+    if (isLow && highT != null && lowT > highT && lastHigh > lastLow) anchor = { hi: lastHigh, lo: lastLow, up: false, start: highT };
+  }
+  if (!anchor) return null;
+  const at = r => anchor.up ? anchor.hi - (anchor.hi - anchor.lo) * r : anchor.lo + (anchor.hi - anchor.lo) * r;
+  return { ...anchor, g50: at(0.5), g618: at(0.618) };
+}
+
+// 반등·반락 후보: 서로 다른 근거 2종류 이상이 0.3 ATR 안에서 겹치는 가격. 근거 수 우선, 같으면 가까운 쪽.
+function pickZone(cands, px, atr, below) {
+  let best = null;
+  for (const c of cands) {
+    if (!(below ? c.p < px : c.p > px) || Math.abs(px - c.p) > atr * 5) continue;
+    const kinds = new Set(cands.filter(q => Math.abs(q.p - c.p) <= atr * 0.3).map(q => q.kind));
+    const rank = kinds.size * 10 - Math.abs(px - c.p) / atr;
+    if (kinds.size >= 2 && (!best || rank > best.rank)) best = { p: c.p, ev: kinds.size, kinds: [...kinds], rank };
+  }
+  return best;
+}
+
+function analyzeChart(now) {
+  const cb = bars.filter(b => b.ct < now), atr = wilderAtr(cb, 14), a = atr.at(-1);
+  const local = localLevels(cb, SR_PRD[state.tf], atr);
+  const fib = fibAnchors(cb);
+  const fibUseful = fib && a && fib.hi - fib.lo >= a;
+  const px = bars.at(-1).c, r = result, tfSec = TF_SEC[state.tf];
+  const cands = [];
+  for (const lv of r.levels) cands.push({ p: lv.p, kind: "상위 레벨" });
+  if (tfSec <= 86400) for (const tl of [r.trendSup, r.trendRes]) if (tl && !tl.broken) cands.push({ p: tl.at(now), kind: "장기 추세선" });
+  if (fibUseful) cands.push({ p: fib.g50, kind: "피보나치" }, { p: fib.g618, kind: "피보나치" });
+  for (const lv of local) if (lv.touches >= 2) cands.push({ p: lv.p, kind: "지지·저항" });
+  const dir = tfSec <= 86400 && r.dailySide ? r.dailySide : tfSec <= 14400 ? r.ichiSide : 0;
+  const zone = dir && a ? pickZone(cands, px, a, dir === -1) : null;
+  // 단기 추세선: 현재 차트 주기의 좌우 5봉 피벗으로 같은 규칙(낮아지는 고점·높아지는 저점, 종가 이탈)을 쓴다.
+  // 지지·저항용 피벗(8~15봉)은 급락·급등 중에 새 쌍이 늦게 생겨 최근 흐름을 놓친다.
+  const shortSup = longTrend(cb, 5, false), shortRes = longTrend(cb, 5, true);
+  return { local, fib: fibUseful ? fib : null, zone: zone && { ...zone, below: dir === -1, half: a * 0.3 }, atr: a, shortSup, shortRes };
+}
+
+// ---------- 차트 ----------
+const chart = LightweightCharts.createChart($("chart"), {
+  autoSize: true,
+  layout: { background: { color: "#0b0e14" }, textColor: "#d1d4dc", fontFamily: "system-ui, 'Malgun Gothic', sans-serif" },
+  grid: { vertLines: { color: "#161b26" }, horzLines: { color: "#161b26" } },
+  rightPriceScale: { borderColor: "#232838" },
+  timeScale: { borderColor: "#232838", timeVisible: true, rightOffset: 12 },
+  crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+});
+const candles = chart.addCandlestickSeries({ upColor: "#14b8a6", downColor: "#ef4444", borderVisible: false, wickUpColor: "#14b8a6", wickDownColor: "#ef4444" });
+const volume = chart.addHistogramSeries({ priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false });
+chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+const lineOpts = { lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false };
+const emaSeries = { ema20: ["#f59e0b", 20], ema50: ["#d946ef", 50], ema200: ["#facc15", 200] };
+for (const k in emaSeries) emaSeries[k] = { s: chart.addLineSeries({ ...lineOpts, color: emaSeries[k][0], lineWidth: k === "ema200" ? 2 : 1 }), n: emaSeries[k][1] };
+const supLine = chart.addLineSeries({ ...lineOpts, color: "#14b8a6", lineWidth: 3 });
+const resLine = chart.addLineSeries({ ...lineOpts, color: "#ef4444", lineWidth: 3 });
+const stSupLine = chart.addLineSeries({ ...lineOpts, color: "#14b8a6", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed });
+const stResLine = chart.addLineSeries({ ...lineOpts, color: "#ef4444", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed });
+const sqLine = chart.addLineSeries({ ...lineOpts, color: "#a855f7", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted });
+const srSeries = [0, 1, 2, 3].map(() => chart.addLineSeries({ ...lineOpts, lineWidth: 2, lastValueVisible: true }));
+const fibSeries = [0, 1].map(() => chart.addLineSeries({ ...lineOpts, color: "#eab308", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: true }));
+let priceLines = [];
+let bars = [], result = null, local = null;
+
+function toCandle(b) { return { time: sec(b.t), open: b.o, high: b.h, low: b.l, close: b.c }; }
+function toVolume(b) { return { time: sec(b.t), value: b.v, color: b.c >= b.o ? "rgba(20,184,166,.35)" : "rgba(239,68,68,.35)" }; }
+
+// 이벤트 시각 이후 첫 차트 봉에 표시한다.
+function barAt(t) {
+  let lo = 0, hi = bars.length - 1, ans = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (bars[m].t >= t) { ans = m; hi = m - 1; } else lo = m + 1; }
+  return ans < 0 ? null : sec(bars[ans].t);
+}
+const segment = (t1, t2, v1, v2) => t1 >= t2 ? [] : [{ time: sec(t1), value: v1 }, { time: sec(t2), value: v2 }];
+
+function render() {
+  const r = result, L = state.layers, tfSec = TF_SEC[state.tf];
+  const show4h = tfSec <= 14400, showDaily = tfSec <= 86400;
+  const markers = [];
+  if (L.signals) for (const p of r.plans) {
+    if ((p.mod === "4H" && !show4h) || (p.mod === "일봉" && !showDaily)) continue;
+    const time = barAt(p.t); if (time == null) continue;
+    const strong = p.mod === "일봉";
+    markers.push(p.dir === 1
+      ? { time, position: "belowBar", shape: "arrowUp", color: strong ? "#14b8a6" : "#5eead4", text: strong ? "L 일봉" : "L" }
+      : { time, position: "aboveBar", shape: "arrowDown", color: strong ? "#ef4444" : "#fca5a5", text: strong ? "S 일봉" : "S" });
+  }
+  if (L.sq && show4h) for (const e of r.sq.events) {
+    const time = barAt(e.t); if (time == null) continue;
+    markers.push(e.type === "entry" ? { time, position: "belowBar", shape: "circle", color: "#a855f7", text: "SQ" } : { time, position: "aboveBar", shape: "square", color: "#a855f7", text: "SQ 청산" });
+  }
+  if (L.trend && showDaily) for (const [tl, text, pos, color] of [[r.trendSup, "장기 지지 이탈", "aboveBar", "#14b8a6"], [r.trendRes, "장기 저항 돌파", "belowBar", "#ef4444"]]) {
+    if (!tl || !tl.broken) continue;
+    const time = barAt(tl.breakT + DAY); if (time != null) markers.push({ time, position: pos, shape: pos === "aboveBar" ? "arrowDown" : "arrowUp", color, text });
+  }
+  markers.sort((a, b) => a.time - b.time);
+  candles.setMarkers(markers);
+
+  for (const pl of priceLines) candles.removePriceLine(pl);
+  priceLines = [];
+  const addLine = (price, color, title, style = LightweightCharts.LineStyle.Solid, width = 1) =>
+    priceLines.push(candles.createPriceLine({ price, color, title, lineStyle: style, lineWidth: width, axisLabelVisible: true }));
+  if (L.plans) for (const p of [r.dailyPlan, r.ichiPlan]) {
+    if (!p || p.state !== "진행" || (p.mod === "4H" && !show4h) || (p.mod === "일봉" && !showDaily)) continue;
+    addLine(p.sl, p.mod === "일봉" ? "#ef4444" : "#f97316", `${p.mod} 손절`, LightweightCharts.LineStyle.Solid, p.mod === "일봉" ? 2 : 1);
+    addLine(p.tp, p.mod === "일봉" ? "#22c55e" : "#84cc16", `${p.mod} 익절`, LightweightCharts.LineStyle.Solid, p.mod === "일봉" ? 2 : 1);
+  }
+  const px = bars.at(-1).c, near = nearest(r.levels, px), lastT = bars.at(-1).t;
+  if (L.levels) {
+    if (near.res) addLine(near.res.p, "rgba(239,68,68,.7)", `${near.res.label} 저항`, LightweightCharts.LineStyle.Dashed);
+    if (near.sup) addLine(near.sup.p, "rgba(20,184,166,.7)", `${near.sup.label} 지지`, LightweightCharts.LineStyle.Dashed);
+  }
+  if (L.mine) for (const p of store.get(`omni-lines-${state.sym}`, [])) addLine(p, "#38bdf8", "내 선", LightweightCharts.LineStyle.Solid, 1);
+  for (const a of store.get(`omni-alerts-${state.sym}`, [])) addLine(a.p, "#eab308", "🔔 알림", LightweightCharts.LineStyle.SparseDotted, 1);
+
+  const trendData = tl => !L.trend || !tl || !showDaily ? [] : segment(Math.max(tl.t1, bars[0].t), tl.broken ? tl.breakT : lastT, tl.at(Math.max(tl.t1, bars[0].t)), tl.at(tl.broken ? tl.breakT : lastT));
+  supLine.setData(trendData(r.trendSup));
+  resLine.setData(trendData(r.trendRes));
+  supLine.applyOptions({ color: r.trendSup && r.trendSup.broken ? "rgba(20,184,166,.4)" : "#14b8a6" });
+  resLine.applyOptions({ color: r.trendRes && r.trendRes.broken ? "rgba(239,68,68,.4)" : "#ef4444" });
+  sqLine.setData(L.sq && r.sq.on && show4h ? segment(lastT - 20 * H4, lastT, r.sq.basis, r.sq.basis) : []);
+
+  for (const k in emaSeries) {
+    const e = emaSeries[k];
+    if (!L[k] || bars.length < e.n) { e.s.setData([]); continue; }
+    const v = ema(bars, e.n);
+    e.s.setData(bars.slice(e.n).map((b, i) => ({ time: sec(b.t), value: v[i + e.n] })));
+  }
+  volume.applyOptions({ visible: L.volume });
+
+  local = analyzeChart(Date.now());
+  // 지지·저항: 2회 이상 확인된 강한 레벨은 굵은 실선, 1회 레벨은 옅은 점선으로 모두 그린다.
+  const srLevels = L.sr ? local.local : [];
+  srSeries.forEach((s, k) => {
+    const lv = srLevels[k];
+    if (!lv) { s.setData([]); return; }
+    const res = lv.p > px, strongLv = lv.touches >= 2;
+    s.applyOptions({
+      color: res ? (strongLv ? "rgba(239,68,68,.8)" : "rgba(239,68,68,.45)") : (strongLv ? "rgba(20,184,166,.8)" : "rgba(20,184,166,.45)"),
+      lineWidth: strongLv ? 2 : 1, lineStyle: strongLv ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dotted,
+      title: `${res ? "저항" : "지지"} ${lv.touches}회`,
+    });
+    s.setData(segment(Math.max(lv.t, bars[0].t), lastT, lv.p, lv.p));
+  });
+  const shortData = t => !L.shortTrend || !t ? [] : segment(Math.max(t.t1, bars[0].t), t.broken ? t.breakT : lastT, t.at(Math.max(t.t1, bars[0].t)), t.at(t.broken ? t.breakT : lastT));
+  stSupLine.setData(shortData(local.shortSup));
+  stResLine.setData(shortData(local.shortRes));
+  stSupLine.applyOptions({ color: local.shortSup && local.shortSup.broken ? "rgba(20,184,166,.35)" : "#14b8a6" });
+  stResLine.applyOptions({ color: local.shortRes && local.shortRes.broken ? "rgba(239,68,68,.35)" : "#ef4444" });
+  const fib = L.fib ? local.fib : null;
+  fibSeries.forEach((s, k) => {
+    if (!fib) { s.setData([]); return; }
+    const value = k ? fib.g618 : fib.g50;
+    s.applyOptions({ title: k ? "0.618" : "0.5" });
+    s.setData(segment(Math.max(fib.start, bars[0].t), lastT, value, value));
+  });
+  const z = local.zone;
+  if (L.zone && z) {
+    const c = z.below ? "rgba(20,184,166,.9)" : "rgba(239,68,68,.9)";
+    addLine(z.p + z.half, c, z.below ? `반등 후보 ${z.ev}/4` : `반락 후보 ${z.ev}/4`, LightweightCharts.LineStyle.LargeDashed, 2);
+    addLine(z.p - z.half, c, "", LightweightCharts.LineStyle.LargeDashed, 2);
+  }
+  renderPanel(near);
+  renderLegend(null);
+}
+
+// ---------- 범례 ----------
+function renderLegend(time) {
+  const b = time == null ? bars.at(-1) : bars.find(x => sec(x.t) === time);
+  if (!b) return;
+  const chg = pct(b.c, b.o), cls = b.c >= b.o ? "L" : "S";
+  $("legend").innerHTML = `${state.sym} · ${state.tf} · ${state.src === "fapi" ? "무기한" : "현물"} &nbsp; 시 <b>${fmt(b.o)}</b> 고 <b>${fmt(b.h)}</b> 저 <b>${fmt(b.l)}</b> 종 <b class="${cls}">${fmt(b.c)}</b> <span class="${cls}">${sgn(chg)}%</span> · ${kst(b.t)}`;
+}
+chart.subscribeCrosshairMove(p => renderLegend(p && p.time != null ? p.time : null));
+
+// ---------- 정보 패널 ----------
+const side = s => s === 1 ? '<span class="L">LONG</span>' : s === -1 ? '<span class="S">SHORT</span>' : '<span class="muted">—</span>';
+function planHtml(p, px, now) {
+  if (!p) return '<span class="muted">신호 없음 · WAIT</span>';
+  if (p.state !== "진행") return `<span class="muted">${p.state} · WAIT</span>`;
+  const hours = Math.floor((now - p.t) / H);
+  return `${side(p.dir)} · <span class="risk">손절 ${fmt(p.sl)} (${sgn(pct(p.sl, px))}%)</span><br><span class="reward">익절 ${fmt(p.tp)} (${sgn(pct(p.tp, px))}%)</span> · ${hours}/72시간`;
+}
+const countdown = period => { const left = period - (Date.now() % period); return `${Math.floor(left / H)}:${String(Math.floor(left % H / 60e3)).padStart(2, "0")}`; };
+
+function renderPanel(near) {
+  const r = result, now = Date.now(), px = bars.at(-1).c, tfSec = TF_SEC[state.tf];
+  const d = r.dailySide, i = r.ichiSide;
+  const relation = d && d === i ? `<span class="${d === 1 ? "L" : "S"}">일치</span>` : d && i ? '<span class="warn">충돌 · WAIT</span>' : '<span class="muted">한쪽만 · WAIT</span>';
+  const run = r.run;
+  const runTxt = !run.cur ? "일봉 방향 없음" : `일봉 ${run.cur === 1 ? "상승" : "하락"} ${run.n}일째 · ` + (run.total < 10 ? `과거 표본 ${run.total}회 (부족)` : run.longer === 0 ? `과거 ${run.total}회 중 가장 김` : `과거 ${run.total}회 중 ${(run.longer / run.total * 100).toFixed(1)}%만 이 이상`);
+  const tl = (t, name, barMs = DAY) => !t ? '<span class="muted">없음</span>' : t.broken ? `<span class="warn">${name} 이탈 (${kst(t.breakT + barMs)})</span>` : `${fmt(t.at(now))} (${sgn(pct(t.at(now), px))}%)`;
+  const sq = r.sq.on ? `<span style="color:var(--sq)">진입 중 · SMA20 ${fmt(r.sq.basis)} (${sgn(pct(r.sq.basis, px))}%)</span>` : r.sq.pressed ? "압축 중" : "대기";
+  const recent = r.plans.filter(p => p.r != null).slice(-30), sumR = recent.reduce((a, p) => a + p.r, 0);
+  const wins = recent.filter(p => p.r > 0).length;
+  const rows = [...r.plans].reverse().slice(0, 12).map(p => `<tr class="pick" data-t="${p.t}"><td>${kst(p.t)}</td><td>${p.mod}</td><td>${side(p.dir)}</td><td>${p.state}</td><td style="text-align:right">${p.r == null ? "-" : sgn(p.r) + "R"}</td></tr>`).join("");
+  const lines = store.get(`omni-lines-${state.sym}`, []), alerts = store.get(`omni-alerts-${state.sym}`, []);
+  const tools = [...lines.map((p, k) => `<div class="row"><span>내 선</span><span>${fmt(p)} (${sgn(pct(p, px))}%) <button class="x" data-del-line="${k}">✕</button></span></div>`),
+    ...alerts.map((a, k) => `<div class="row"><span>🔔 ${a.dir === 1 ? "이상" : "이하"}</span><span>${fmt(a.p)} (${sgn(pct(a.p, px))}%) <button class="x" data-del-alert="${k}">✕</button></span></div>`)].join("");
+  $("panel").innerHTML = `
+    <div class="card"><h3><span>${state.sym} · ${state.src === "fapi" ? "USDT 무기한" : "현물(선물 연결 실패)"}</span><span>${state.tf}</span></h3>
+      <div class="big">${fmt(px)}</div><div class="note">참고 정보 · 자동 주문 없음 · 신호는 봉 마감 확정값</div></div>
+    <div class="card"><h3><span>관심 종목</span><span class="muted">클릭하면 전환</span></h3><div id="watch" class="muted">불러오는 중…</div></div>
+    <div class="card"><h3>방향</h3>
+      <div class="row"><span>일봉 · 4H</span><span>${side(d)} · ${side(i)} → ${relation}</span></div>
+      <div class="row"><span>추세 지속</span><span>${runTxt}</span></div></div>
+    <div class="card"><h3>계획 (위험 먼저)</h3>
+      <div class="row"><span>일봉</span><span>${planHtml(r.dailyPlan, px, now)}</span></div>
+      <div class="row"><span>4H</span><span>${tfSec > 14400 ? '<span class="muted">4시간 이하 차트에서 표시</span>' : planHtml(r.ichiPlan, px, now)}</span></div>
+      <div class="row"><span>다음 손절폭</span><span class="risk">일봉 ${r.stopDaily ? r.stopDaily.toFixed(1) : "-"}% · 4H ${r.stopIchi ? r.stopIchi.toFixed(1) : "-"}%</span></div>
+      <div class="row"><span>다음 판단</span><span>4H <b id="cd4">${countdown(H4)}</b> · 일봉 <b id="cd1">${countdown(DAY)}</b></span></div></div>
+    <div class="card"><h3>수량 계산 (추정 · 수수료 제외)</h3>
+      <div class="row"><span>계좌 USDT</span><span><input id="acct" type="number" min="0" step="10" style="width:110px" value="${store.get("omni-acct", "")}"></span></div>
+      <div class="row"><span>1회 위험 %</span><span><input id="riskp" type="number" min="0.1" step="0.1" style="width:110px" value="${store.get("omni-risk", "1")}"></span></div>
+      <div class="row"><span>레버리지 (격리)</span><span><input id="lev" type="number" min="1" step="1" style="width:110px" value="${store.get("omni-lev", "2")}"></span></div>
+      <div id="sizeOut" class="note"></div></div>
+    <div class="card"><h3>구조</h3>
+      <div class="row"><span>장기 지지선</span><span>${tl(r.trendSup, "지지")}</span></div>
+      <div class="row"><span>장기 저항선</span><span>${tl(r.trendRes, "저항")}</span></div>
+      <div class="row"><span>단기 지지선</span><span>${tl(local.shortSup, "지지", tfSec * 1000)}</span></div>
+      <div class="row"><span>단기 저항선</span><span>${tl(local.shortRes, "저항", tfSec * 1000)}</span></div>
+      <div class="row"><span>위 저항</span><span>${near.res ? `${near.res.label} ${fmt(near.res.p)} (${sgn(pct(near.res.p, px))}%)` : "-"}</span></div>
+      <div class="row"><span>아래 지지</span><span>${near.sup ? `${near.sup.label} ${fmt(near.sup.p)} (${sgn(pct(near.sup.p, px))}%)` : "-"}</span></div>
+      <div class="row"><span>${local.zone && !local.zone.below ? "반락 후보" : "반등 후보"}</span><span>${local.zone ? `${fmt(local.zone.p)} (${sgn(pct(local.zone.p, px))}%) · ${local.zone.kinds.join("·")}` : '<span class="muted">근거 2종류 이상 겹치는 곳 없음</span>'}</span></div>
+      <div class="row"><span>피보나치</span><span>${local.fib ? `0.5 ${fmt(local.fib.g50)} · 0.618 ${fmt(local.fib.g618)}` : '<span class="muted">스윙이 ATR보다 좁아 숨김</span>'}</span></div>
+      <div class="row"><span>SQ</span><span>${tfSec > 14400 ? '<span class="muted">4시간 이하 차트에서 표시</span>' : sq}</span></div></div>
+    <div class="card"><h3>내 수평선 · 가격 알림</h3>${tools || '<div class="muted">상단 버튼을 누른 뒤 차트를 클릭하거나 아래에 가격을 넣으세요.</div>'}
+      <div class="inline"><input id="lineIn" type="number" placeholder="가격"><button id="addLine">선 추가</button><button id="addAlert">알림 추가</button></div></div>
+    <div class="card"><h3>최근 신호 <span class="muted">클릭하면 이동</span></h3>
+      <table>${rows || '<tr><td class="muted">불러온 기간에 신호 없음</td></tr>'}</table>
+      <div class="note">최근 종료 ${recent.length}건 · 수익 ${wins}건 · 합계 ${sgn(sumR)}R · 수수료 제외 · 손절 -1R, 익절 +2R, 만료·교체는 그 시가 기준</div></div>`;
+  for (const id of ["acct", "riskp", "lev"]) $(id).oninput = updateSizing;
+  updateSizing();
+  for (const tr of document.querySelectorAll("tr.pick")) tr.onclick = () => {
+    const span = 40 * TF_SEC[state.tf];
+    chart.timeScale().setVisibleRange({ from: sec(+tr.dataset.t) - span, to: sec(+tr.dataset.t) + span });
+  };
+  for (const b of document.querySelectorAll("[data-del-line]")) b.onclick = () => { const v = store.get(`omni-lines-${state.sym}`, []); v.splice(+b.dataset.delLine, 1); store.set(`omni-lines-${state.sym}`, v); render(); };
+  for (const b of document.querySelectorAll("[data-del-alert]")) b.onclick = () => { const v = store.get(`omni-alerts-${state.sym}`, []); v.splice(+b.dataset.delAlert, 1); store.set(`omni-alerts-${state.sym}`, v); render(); };
+  $("addLine").onclick = () => { const p = +$("lineIn").value; if (p > 0) addMine("line", p); };
+  $("addAlert").onclick = () => { const p = +$("lineIn").value; if (p > 0) addMine("alert", p); };
+  renderWatch();
+}
+setInterval(() => { const a = $("cd4"), b = $("cd1"); if (a) a.textContent = countdown(H4); if (b) b.textContent = countdown(DAY); }, 1000);
+
+// ---------- 수량 계산 ----------
+// 지금 가격에 들어간다고 보고, 진행 중인 계획의 손절까지 잃는 금액이 계좌×위험%가 되도록 수량을 잡는다.
+// 청산가는 격리·선형 계약, 유지증거금 0.4% 가정의 대략값이다. 실제 값은 거래소 화면을 따른다.
+function sizing(account, riskPct, lev, px, sl, dir) {
+  const dist = Math.abs(px - sl);
+  if (!(account > 0) || !(dist > 0) || (dir === 1 ? sl >= px : sl <= px)) return null;
+  const qty = account * riskPct / 100 / dist;
+  const liq = dir === 1 ? px * (1 - 1 / lev + 0.004) : px * (1 + 1 / lev - 0.004);
+  return { qty, notional: qty * px, margin: qty * px / lev, liq, liqFirst: dir === 1 ? liq >= sl : liq <= sl };
+}
+function updateSizing() {
+  const out = $("sizeOut"); if (!out || !result) return;
+  const account = +$("acct").value, riskPct = +$("riskp").value, lev = Math.max(1, +$("lev").value || 1);
+  store.set("omni-acct", $("acct").value); store.set("omni-risk", $("riskp").value); store.set("omni-lev", $("lev").value);
+  const px = bars.at(-1).c, base = state.sym.replace(/USDT$/, "");
+  const active = [result.dailyPlan, result.ichiPlan].filter(p => p && p.state === "진행");
+  if (!(account > 0)) { out.textContent = "계좌 금액을 넣으면 진행 중인 계획의 수량을 계산합니다."; return; }
+  if (!active.length) { out.textContent = "진행 중인 계획이 없습니다 · WAIT"; return; }
+  out.innerHTML = active.map(p => {
+    const s = sizing(account, riskPct, lev, px, p.sl, p.dir);
+    if (!s) return `${p.mod}: 현재가가 이미 손절선을 넘었습니다`;
+    return `${p.mod} ${p.dir === 1 ? "LONG" : "SHORT"}: <b>${fmt(s.qty)} ${base}</b> · 명목 ${fmt(s.notional)} USDT · 증거금 ${fmt(s.margin)}<br>` +
+      `손절 시 -${fmt(account * riskPct / 100)} USDT · 예상 청산 ${fmt(s.liq)}` +
+      (s.liqFirst ? ' <span class="warn">⚠ 손절 전에 청산</span>' : "") + (s.margin > account ? ' <span class="warn">⚠ 증거금 부족</span>' : "");
+  }).join("<br><br>");
+}
+
+// ---------- 내 수평선 · 가격 알림 ----------
+function addMine(kind, price) {
+  if (kind === "line") { const v = store.get(`omni-lines-${state.sym}`, []); v.push(price); store.set(`omni-lines-${state.sym}`, v); }
+  else { const v = store.get(`omni-alerts-${state.sym}`, []); v.push({ p: price, dir: price >= bars.at(-1).c ? 1 : -1 }); store.set(`omni-alerts-${state.sym}`, v); }
+  render();
+}
+function setMode(mode) {
+  state.mode = state.mode === mode ? null : mode;
+  $("drawLine").classList.toggle("armed", state.mode === "line");
+  $("drawAlert").classList.toggle("armed", state.mode === "alert");
+  $("hint").textContent = state.mode === "line" ? "차트를 클릭하면 그 가격에 수평선을 긋습니다" : state.mode === "alert" ? "차트를 클릭하면 그 가격에 알림을 겁니다" : "";
+}
+$("drawLine").onclick = () => setMode("line");
+$("drawAlert").onclick = () => setMode("alert");
+chart.subscribeClick(p => {
+  if (!state.mode || !p.point) return;
+  const price = candles.coordinateToPrice(p.point.y);
+  if (price == null) return;
+  const mode = state.mode; setMode(mode);
+  addMine(mode, +price.toPrecision(8));
+});
+function checkAlerts(price) {
+  const key = `omni-alerts-${state.sym}`, alerts = store.get(key, []);
+  const hit = alerts.filter(a => (a.dir === 1 ? price >= a.p : price <= a.p));
+  if (!hit.length) return;
+  store.set(key, alerts.filter(a => !hit.includes(a)));
+  for (const a of hit) notify(`OMNI ${state.sym} 가격 ${a.dir === 1 ? "도달 ▲" : "도달 ▼"} ${fmt(a.p)}`, `현재가 ${fmt(price)}`);
+  render();
+}
+
+// ---------- 알림 ----------
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)(), o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.25);
+  } catch {}
+}
+function notify(title, body) {
+  beep();
+  if ("Notification" in window && Notification.permission === "granted") new Notification(title, { body });
+  $("hint").textContent = `${title} · ${body}`;
+  setTimeout(() => { if (!state.mode) $("hint").textContent = ""; }, 15000);
+}
+function notifyNew() {
+  const key = `omni-seen-${state.sym}`, seen = store.get(key, 0);
+  const fresh = result.plans.filter(p => p.t > seen && Date.now() - p.t < H4);
+  const sqFresh = result.sq.events.filter(e => e.t > seen && Date.now() - e.t < H4);
+  store.set(key, Math.max(seen, ...result.plans.map(p => p.t), ...result.sq.events.map(e => e.t)));
+  if (!seen) return;
+  for (const p of fresh) notify(`OMNI ${state.sym} ${p.mod} ${p.dir === 1 ? "LONG" : "SHORT"}`, `손절 ${fmt(p.sl)} · 익절 ${fmt(p.tp)} · 72시간 · 자동 주문 없음`);
+  for (const e of sqFresh) notify(`OMNI ${state.sym} ${e.type === "entry" ? "SQ LONG" : "SQ 청산"}`, "4H 마감 기준 · 자동 주문 없음");
+}
+$("notify").onclick = async () => {
+  if (!("Notification" in window)) { $("notify").textContent = "알림 미지원"; return; }
+  const p = await Notification.requestPermission();
+  $("notify").textContent = p === "granted" ? "알림 켜짐" : "알림 거부됨";
+  $("notify").classList.toggle("on", p === "granted");
+  beep();
+};
+if ("Notification" in window && Notification.permission === "granted") { $("notify").textContent = "알림 켜짐"; $("notify").classList.add("on"); }
+
+// ---------- 관심 종목 ----------
+function watchList() { return store.get("omni-watch", WATCH_DEFAULT); }
+async function loadWatch() {
+  const now = Date.now();
+  state.watch = await Promise.all(watchList().map(async s => {
+    try {
+      const [h4, d1] = await Promise.all([klines(s, "4h", 400, false), klines(s, "1d", 500, false)]);
+      const r = analyze(h4, d1, now);
+      const plan = [r.ichiPlan, r.dailyPlan].filter(p => p && p.state === "진행").sort((a, b) => b.t - a.t)[0];
+      return { s, px: h4.at(-1).c, chg: pct(h4.at(-1).c, d1.at(-2).c), d: r.dailySide, i: r.ichiSide, plan };
+    } catch { return { s, err: true }; }
+  }));
+  renderWatch();
+}
+function renderWatch() {
+  const box = $("watch"); if (!box) return;
+  if (!state.watch.length) { box.textContent = "불러오는 중…"; return; }
+  box.innerHTML = `<table>${state.watch.map(w => w.err
+    ? `<tr><td>${w.s.replace("USDT", "")}</td><td colspan="3" class="muted">불러오기 실패</td></tr>`
+    : `<tr class="pick${w.s === state.sym ? " cur" : ""}" data-sym="${w.s}"><td>${w.s.replace("USDT", "")}</td><td style="text-align:right">${fmt(w.px)}</td><td class="${w.chg >= 0 ? "L" : "S"}" style="text-align:right">${sgn(w.chg)}%</td><td style="text-align:right">${side(w.d)}/${side(w.i)}</td><td style="text-align:right">${w.plan ? `${w.plan.mod} ${w.plan.dir === 1 ? '<span class="L">L</span>' : '<span class="S">S</span>'}` : '<span class="muted">WAIT</span>'}</td></tr>`).join("")}</table>
+    <div class="note">일봉/4H 방향 · 진행 중 계획 · 24h 등락은 전일 종가 대비</div>`;
+  for (const tr of box.querySelectorAll("tr[data-sym]")) tr.onclick = () => switchSym(tr.dataset.sym);
+}
+function updateStar() { $("star").textContent = watchList().includes(state.sym) ? "★" : "☆"; }
+$("star").onclick = () => {
+  const list = watchList(), k = list.indexOf(state.sym);
+  if (k >= 0) list.splice(k, 1); else list.push(state.sym);
+  store.set("omni-watch", list); updateStar(); loadWatch();
+};
+
+// ---------- 지원 코인 목록 ----------
+// 바이낸스 USDT 무기한 중 거래 중인 종목 전부를 24시간 거래대금 순으로 검색 목록에 넣는다.
+async function loadSymbols() {
+  try {
+    const [info, tick] = await Promise.all([
+      fetch("https://fapi.binance.com/fapi/v1/exchangeInfo").then(r => r.json()),
+      fetch("https://fapi.binance.com/fapi/v1/ticker/24hr").then(r => r.json()),
+    ]);
+    const vol = new Map(tick.map(t => [t.symbol, +t.quoteVolume]));
+    const list = info.symbols.filter(s => s.contractType === "PERPETUAL" && s.quoteAsset === "USDT" && s.status === "TRADING")
+      .map(s => s.symbol).sort((a, b) => (vol.get(b) || 0) - (vol.get(a) || 0));
+    const usd = v => v >= 1e9 ? (v / 1e9).toFixed(1) + "B" : (v / 1e6).toFixed(0) + "M";
+    $("symlist").innerHTML = list.map(s => `<option value="${s}">${s.replace(/USDT$/, "")} · 24h ${usd(vol.get(s) || 0)} USDT</option>`).join("");
+    $("sym").title = `바이낸스 USDT 무기한 ${list.length}종목 검색 가능`;
+  } catch { /* 목록을 못 받아도 직접 입력은 그대로 된다 */ }
+}
+
+// ---------- 불러오기 · 실시간 ----------
+function setStatus(text, cls = "") { $("status").textContent = text; $("status").className = cls; }
+
+async function load(keepView = false) {
+  const sym = state.sym, tf = state.tf;
+  try {
+    setStatus("불러오는 중…");
+    const [chartBars, h4, d1] = await Promise.all([
+      klines(sym, tf), tf === "4h" ? null : klines(sym, "4h"), tf === "1d" ? null : klines(sym, "1d"),
+    ]);
+    if (sym !== state.sym || tf !== state.tf) return;
+    bars = chartBars;
+    const precision = digits(bars.at(-1).c);
+    candles.applyOptions({ priceFormat: { type: "price", precision, minMove: 10 ** -precision } });
+    const view = keepView ? chart.timeScale().getVisibleLogicalRange() : null;
+    candles.setData(bars.map(toCandle));
+    volume.setData(bars.map(toVolume));
+    result = analyze(h4 || chartBars, d1 || chartBars, Date.now());
+    render();
+    if (view) chart.timeScale().setVisibleLogicalRange(view);
+    notifyNew();
+    connect();
+    scheduleReload();
+  } catch (e) {
+    setStatus(e.message, "err");
+    $("panel").innerHTML = `<div class="card"><h3>오류</h3><div class="S">${e.message}</div><div class="note">심볼 철자와 네트워크를 확인하세요. 바이낸스 USDT 무기한 심볼 예: BTCUSDT, ETHUSDT</div></div>`;
+  }
+}
+
+// 다음 4H 마감 5초 뒤에 신호를 다시 계산하고 관심 종목도 갱신한다(일봉 마감도 4H 마감과 겹친다).
+function scheduleReload() {
+  clearTimeout(state.timer);
+  state.timer = setTimeout(() => { load(true); loadWatch(); }, H4 - (Date.now() % H4) + 5000);
+}
+
+function connect() {
+  if (state.ws) { state.ws.onclose = null; state.ws.close(); }
+  const host = state.src === "fapi" ? "wss://fstream.binance.com/ws/" : "wss://stream.binance.com:9443/ws/";
+  const ws = new WebSocket(`${host}${state.sym.toLowerCase()}@kline_${state.tf}`);
+  state.ws = ws;
+  ws.onopen = () => setStatus("실시간", "live");
+  ws.onmessage = ev => {
+    const k = JSON.parse(ev.data).k;
+    const b = { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, ct: k.T };
+    if (bars.length && b.t < bars.at(-1).t) return;
+    if (bars.length && b.t === bars.at(-1).t) bars[bars.length - 1] = b; else bars.push(b);
+    candles.update(toCandle(b));
+    volume.update(toVolume(b));
+    checkAlerts(b.c);
+    renderLegend(null);
+    // 15분·1시간 차트는 봉이 마감될 때마다 지지·저항·피보나치를 다시 계산한다.
+    if (k.x && TF_SEC[state.tf] < 14400) setTimeout(() => load(true), 3000);
+  };
+  ws.onclose = () => { if (state.ws === ws) { setStatus("연결 끊김 · 재연결 중", "err"); setTimeout(() => state.ws === ws && connect(), 5000); } };
+}
+
+function switchSym(sym) {
+  state.sym = sym; $("sym").value = sym; store.set("omni-sym", sym); updateStar(); setMode(null); load();
+}
+$("tf").onclick = e => {
+  const tf = e.target.dataset && e.target.dataset.tf; if (!tf) return;
+  state.tf = tf; store.set("omni-tf", tf);
+  for (const b of $("tf").querySelectorAll("button")) b.classList.toggle("active", b.dataset.tf === tf);
+  load();
+};
+$("sym").onchange = () => switchSym($("sym").value.trim().toUpperCase() || "BTCUSDT");
+for (const box of $("layers").querySelectorAll("input")) box.checked = !!state.layers[box.dataset.layer];
+$("layers").onchange = e => { const k = e.target.dataset.layer; if (!k) return; state.layers[k] = e.target.checked; store.set("omni-layers", state.layers); if (result) render(); };
+document.addEventListener("click", e => { if (!$("layerMenu").contains(e.target)) $("layerMenu").open = false; });
+document.addEventListener("keydown", e => { if (e.key === "Escape") setMode(null); });
+
+$("sym").value = state.sym;
+for (const b of $("tf").querySelectorAll("button")) b.classList.toggle("active", b.dataset.tf === state.tf);
+updateStar();
+load();
+loadWatch();
+loadSymbols();
+</script>
+</body>
+</html>
