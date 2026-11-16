@@ -48,7 +48,7 @@ class MarketClient {
 }
 // A newer selection invalidates all older REST and socket callbacks, including errors.
 class Selection {
-  constructor(client) { this.client=client; this.version=0; this.controller=null; this.socket=null; }
+  constructor(client) { this.client=client; this.version=0; this.tickVersion=0; this.controller=null; this.socket=null; }
   stopSocket() {
     if(this.socket) { this.socket.onopen=this.socket.onmessage=this.socket.onclose=this.socket.onerror=null; this.socket.close(); this.socket=null; }
   }
@@ -62,6 +62,15 @@ class Selection {
     } catch(error) { if(version!==this.version) return null; throw error; }
   }
   current(data) { return data && data.version===this.version; }
+  async latest(data,signal) {
+    if(!this.current(data)) return null;
+    const ticks=this.tickVersion;
+    try {
+      const bars=await this.client.klines(data.symbol,data.timeframe,{limit:2,signal});
+      // A REST response started before a newer socket tick must not roll it back.
+      return this.current(data)&&ticks===this.tickVersion?bars:null;
+    } catch(error) { if(!this.current(data)) return null; throw error; }
+  }
   connect(data,callbacks,Socket=WebSocket) {
     if(!this.current(data)) return;
     this.stopSocket();
@@ -75,6 +84,7 @@ class Selection {
         if(message.s!==data.symbol || !k || k.i!==data.timeframe) return;
         const bar={t:k.t,o:+k.o,h:+k.h,l:+k.l,c:+k.c,v:+k.v,ct:k.T};
         if(![bar.t,bar.o,bar.h,bar.l,bar.c,bar.v,bar.ct].every(Number.isFinite) || bar.l<=0 || bar.h<Math.max(bar.o,bar.c,bar.l) || bar.l>Math.min(bar.o,bar.c)) return;
+        this.tickVersion++;
         callbacks.tick?.(bar,!!k.x);
       } catch { callbacks.error?.('실시간 데이터 해석 실패'); }
     };

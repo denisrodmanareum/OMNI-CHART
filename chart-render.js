@@ -45,6 +45,13 @@ let bars = [], result = null, local = null;
 function toCandle(b) { return { time: sec(b.t), open: b.o, high: b.h, low: b.l, close: b.c }; }
 function toVolume(b) { return { time: sec(b.t), value: b.v, color: b.c >= b.o ? "rgba(20,184,166,.35)" : "rgba(239,68,68,.35)" }; }
 
+function updateLiveIndicators() {
+  const last=bars.at(-1);if(!last) return;
+  for(const [key,e] of Object.entries(emaSeries)) {
+    if(state.layers[key] && bars.length>e.n) e.s.update({time:sec(last.t),value:ema(bars,e.n).at(-1)});
+  }
+}
+
 // 이벤트 시각 이후 첫 차트 봉에 표시한다.
 function barAt(t) { const at = eventBar(bars, t); return at == null ? null : sec(at); }
 const segment = (t1, t2, v1, v2) => t1 >= t2 ? [] : [{ time: sec(t1), value: v1 }, { time: sec(t2), value: v2 }];
@@ -145,9 +152,10 @@ function render() {
 // ---------- 범례 ----------
 function renderLegend(time) {
   if (!state.ready || !bars.length) return;
-  const b = time == null ? bars.at(-1) : bars.find(x => sec(x.t) === time);
+  const selectedTime = time ?? state.crosshairTime;
+  const b = selectedTime == null ? bars.at(-1) : bars.find(x => sec(x.t) === selectedTime) || bars.at(-1);
   if (!b) return;
   const chg = pct(b.c, b.o), cls = b.c >= b.o ? "L" : "S";
   $("legend").innerHTML = `${state.data.symbol} · ${state.data.timeframe} · ${"USDT 무기한"} &nbsp; 시 <b>${fmt(b.o)}</b> 고 <b>${fmt(b.h)}</b> 저 <b>${fmt(b.l)}</b> 종 <b class="${cls}">${fmt(b.c)}</b> <span class="${cls}">${sgn(chg)}%</span> · ${kst(b.t)}`;
 }
-chart.subscribeCrosshairMove(p => renderLegend(p && p.time != null ? p.time : null));
+chart.subscribeCrosshairMove(p => { state.crosshairTime=p && p.time != null ? p.time : null; renderLegend(state.crosshairTime); });

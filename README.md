@@ -11,7 +11,7 @@
 
 ```sh
 python -m http.server 8765 --bind 127.0.0.1
-node --test tests/regression.test.cjs
+node --test tests/*.test.cjs
 ```
 
 브라우저에서 `http://127.0.0.1:8765`를 엽니다. 실행에는 인터넷과 Binance 공개 API 접근이 필요합니다.
@@ -38,6 +38,8 @@ node --test tests/regression.test.cjs
 - 마감된 일봉·4H 방향과 계획, 지지·저항, 추세선, 피보나치, 후보 구간, SQ
 
 체결가·현재가 대비 손절 거리 등은 수신 틱에 맞춰 제한된 빈도로 갱신합니다.
+소켓 틱이 8초 이상 없으면 최근 선물 캔들 2개를 5초마다 REST로 보완하며, 수신 방식과 경과 시간을 표시합니다. 늦은 REST 응답은 더 최신 소켓 틱을 덮어쓰지 못합니다.
+시세가 30초 이상 갱신되지 않으면 현재 판단도 `시세 확인`으로 바뀝니다. EMA는 최신 봉을 함께 갱신하고, 교차선을 가리키는 동안 OHLC는 선택한 봉의 값을 유지합니다.
 선물 지표는 30초, 관심 종목 분석은 60초마다 갱신하며 시각과 실패 상태를 표시합니다.
 관심 종목의 비선택 가격은 조회 시점 스냅샷입니다. OI와 펀딩비를 단독 방향 신호로 취급하지 않습니다.
 
@@ -64,6 +66,7 @@ node --test tests/regression.test.cjs
 ## 파일과 라이선스
 
 - `core.js`: 확정 봉 분석·주봉 집계·시각 및 Auto 범위 계산
+- `boot.js`: 구성 파일 로딩 실패 안내·새로고침 복구
 - `market.js`: 선물 공개 REST·선택 세대/소켓 격리
 - `app-state.js`, `chart-render.js`, `app.js`, `styles.css`: 상태·차트·UI
 - `tests/regression.test.cjs`: 네트워크 지연·실패와 데이터/범위 회귀 검증

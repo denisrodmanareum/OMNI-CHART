@@ -94,3 +94,25 @@ test('independent futures metrics expose partial failures without fabricated zer
   const client=new MarketClient(async url=>url.includes('openInterest')?{ok:false,status:503}:{ok:true,json:async()=>({symbol:'BTCUSDT'})});
   const metrics=await client.futures('BTCUSDT');assert.deepEqual(metrics.errors,['oi']);assert.equal(metrics.oi,undefined);assert.ok(metrics.premium);
 });
+test('fallback REST requests only the current two candles from the selected perpetual frame',async()=>{
+  const calls=[];
+  const selection=new Selection({snapshot:async(symbol,timeframe)=>({symbol,timeframe}),klines:async(...args)=>{calls.push(args);return [bar()];}});
+  const data=await selection.load('BTCUSDT','4h');const rows=await selection.latest(data);
+  assert.equal(rows.length,1);assert.equal(calls[0][0],'BTCUSDT');assert.equal(calls[0][1],'4h');assert.equal(calls[0][2].limit,2);
+});
+test('fallback REST response cannot overwrite a newer accepted WebSocket tick',async()=>{
+  class Socket{close(){}}
+  const request=deferred();
+  const selection=new Selection({snapshot:async(symbol,timeframe)=>({symbol,timeframe}),klines:()=>request.promise});
+  const data=await selection.load('BTCUSDT','4h');selection.connect(data,{tick(){}},Socket);
+  const poll=selection.latest(data);
+  selection.socket.onmessage({data:JSON.stringify({s:'BTCUSDT',k:{i:'4h',t:0,T:100,o:100,h:110,l:90,c:105,v:2}})});
+  request.resolve([bar(0,{c:101})]);assert.equal(await poll,null);
+});
+test('fallback REST success and failure from an old symbol are discarded',async()=>{
+  const requests=[];
+  const selection=new Selection({snapshot:async(symbol,timeframe)=>({symbol,timeframe}),klines:()=>{const d=deferred();requests.push(d);return d.promise;}});
+  const old=await selection.load('BTCUSDT','4h');const success=selection.latest(old),failure=selection.latest(old);
+  await selection.load('ETHUSDT','15m');requests[0].resolve([bar()]);requests[1].reject(new Error('old failure'));
+  assert.equal(await success,null);assert.equal(await failure,null);
+});

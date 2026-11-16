@@ -6,13 +6,14 @@
 <meta name="theme-color" content="#090d16">
 <meta name="description" content="AngelAreum · USDT 무기한 선물 차트, 구조 분석과 위험 우선 판단 도구.">
 <title>AngelAreum · Futures Terminal</title>
-<link rel="stylesheet" href="styles.css?v=3">
+<link rel="stylesheet" href="styles.css?v=4">
+<script defer src="boot.js?v=4"></script>
 <script defer src="vendor/lightweight-charts.standalone.production.js?v=4.2.0"></script>
-<script defer src="core.js?v=3"></script>
-<script defer src="market.js?v=3"></script>
-<script defer src="app-state.js?v=3"></script>
-<script defer src="chart-render.js?v=3"></script>
-<script defer src="app.js?v=3"></script>
+<script defer src="core.js?v=4"></script>
+<script defer src="market.js?v=4"></script>
+<script defer src="app-state.js?v=4"></script>
+<script defer src="chart-render.js?v=4"></script>
+<script defer src="app.js?v=4"></script>
 </head>
 <body>
 <a class="skip" href="#panel">분석 패널로 이동</a>
@@ -27,7 +28,7 @@
   <span class="divider"></span>
   <div class="group"><button id="autoScale" aria-pressed="true" title="보이는 캔들 높이에 자동 맞춤 · A">Auto</button><button id="goLive" title="최신 캔들로 이동 · L">최신</button></div>
   <details id="layerMenu"><summary>레이어</summary><div class="menu">
-    <div class="menu-heading">차트 밀도 <span>표시만 변경</span></div>
+    <div class="menu-heading">차트 밀도 <span>표시만 변경</span><button id="closeLayers" aria-label="레이어 닫기">닫기</button></div>
     <div class="presets" id="presets"><button data-preset="focus">집중</button><button data-preset="structure">구조</button><button data-preset="pro">전체</button></div>
     <div id="layers" class="layer-grid">
       <label><input type="checkbox" data-layer="signals">L/S 신호</label><label><input type="checkbox" data-layer="plans">손절·익절</label><label><input type="checkbox" data-layer="sq">SQ</label><label><input type="checkbox" data-layer="trend">장기 추세선</label><label><input type="checkbox" data-layer="shortTrend">단기 추세선</label><label><input type="checkbox" data-layer="levels">상위 레벨</label><label><input type="checkbox" data-layer="sr">지지·저항</label><label><input type="checkbox" data-layer="fib">피보나치</label><label><input type="checkbox" data-layer="zone">반등 후보</label><label><input type="checkbox" data-layer="ema20">EMA 20</label><label><input type="checkbox" data-layer="ema50">EMA 50</label><label><input type="checkbox" data-layer="ema200">EMA 200</label><label><input type="checkbox" data-layer="volume">거래량</label><label><input type="checkbox" data-layer="mine">내 수평선</label>

@@ -4,6 +4,7 @@ const countdown=period=>duration(period-Date.now()%period);
 const duration=ms=>ms>0?`${Math.floor(ms/H)}:${String(Math.floor(ms%H/60000)).padStart(2,'0')}:${String(Math.floor(ms%60000/1000)).padStart(2,'0')}`:'정산 확인 중';
 let reconnectTimer=null, refreshTimer=null, liveUiTimer=null, watchVersion=0,watchController=null, futuresController=null, toastTimer=null;
 let pendingJump=null;
+let pricePollController=null;
 function setStatus(text,cls='') { $('status').textContent=text; $('status').className=cls; }
 function toast(message,undo=null) {
   clearTimeout(toastTimer); state.undo=undo;
@@ -16,7 +17,7 @@ function chartState(title,message,error=false) {
   $('chartState').hidden=false; $('chartStateTitle').textContent=title; $('chartStateMessage').textContent=message; $('retry').hidden=!error;
 }
 function clearChart() {
-  bars=[];result=null;local=null;$('legend').textContent='';$('hint').textContent='';
+  bars=[];result=null;local=null;state.crosshairTime=null;$('legend').textContent='';$('hint').textContent='';
   candles.setData([]);volume.setData([]);
   for(const series of [supLine,resLine,stSupLine,stResLine,sqLine,...srSeries,...fibSeries,...Object.values(emaSeries).map(e=>e.s)]) series.setData([]);
   for(const line of priceLines) candles.removePriceLine(line);priceLines=[];
@@ -24,6 +25,9 @@ function clearChart() {
 function syncControls() {
   for(const b of $('tf').querySelectorAll('button')) {const active=b.dataset.tf===state.tf;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));}
   for(const b of $('layers').querySelectorAll('input')) b.checked=!!state.layers[b.dataset.layer];
+  const matchPreset=preset=>Object.keys(LAYER_DEFAULT).every(k=>!!state.layers[k]===preset.includes(k));
+  const presetKeys={focus:['signals','plans','levels','zone','volume','mine'],structure:['signals','plans','trend','shortTrend','levels','sr','fib','zone','volume','mine'],pro:Object.keys(LAYER_DEFAULT)};
+  for(const b of $('presets').querySelectorAll('button')) b.setAttribute('aria-pressed',String(matchPreset(presetKeys[b.dataset.preset])));
   for(const id of ['drawLine','drawAlert','deleteLine']) $(id).disabled=!state.ready;
   $('autoScale').setAttribute('aria-pressed',String(state.auto));
   $('autoScale').title=state.auto?'자동 높이 맞춤 켜짐 · 보이는 캔들 기준 · A':'자동 높이 맞춤 꺼짐 · A로 켜기';
@@ -35,10 +39,11 @@ function updateSummary() {
   const conflict=result.dailySide && result.ichiSide && result.dailySide!==result.ichiSide;
   const activeSides=new Set(active.map(p=>p.dir));
   const unsafe=conflict || activeSides.size>1;
-  const label=!active.length || unsafe?'WAIT':active[0].dir===1?'LONG 관찰':'SHORT 관찰';
+  const stale=Date.now()-state.lastTick>30000;
+  const label=stale?'시세 확인':!active.length || unsafe?'WAIT':active[0].dir===1?'LONG 관찰':'SHORT 관찰';
   $('decisionState').textContent=label;
-  $('decisionState').style.color=label==='WAIT'?'var(--gold)':active[0].dir===1?'var(--long)':'var(--short)';
-  $('decisionReason').textContent=unsafe?'일봉과 4H 방향 충돌 · 신규 진입 대기':!active.length?'진행 중 계획 없음 · 다음 확정 신호를 기다리는 구간':'마감 확정 계획 추적 중 · 현재 가격의 신규 진입 신호가 아닙니다';
+  $('decisionState').style.color=stale||label==='WAIT'?'var(--gold)':active[0].dir===1?'var(--long)':'var(--short)';
+  $('decisionReason').textContent=stale?'가격 수신 지연 · 마지막 가격으로 판단하지 마세요':unsafe?'일봉과 4H 방향 충돌 · 신규 진입 대기':!active.length?'진행 중 계획 없음 · 다음 확정 신호를 기다리는 구간':'마감 확정 계획 추적 중 · 현재 가격의 신규 진입 신호가 아닙니다';
   const stopText=value=>value==null?'—':`${value.toFixed(1)}%${value>MAX_STOP?' (10% 상한 초과 · 신호 제외)':''}`;
   $('decisionRisk').textContent=active.length?active.map(p=>`${p.mod} 손절 ${fmt(p.sl)} · 현재가 대비 ${sgn(pct(p.sl,bars.at(-1).c))}%`).join(' / '):`다음 신호 손절폭 참고 · 일봉 ${stopText(result.stopDaily)} / 4H ${stopText(result.stopIchi)}`;
 }
@@ -212,6 +217,9 @@ function renderWatch() {
   const box=$('watch');if(!box) return;
   if(!state.watchLoaded && !state.watch.length){box.textContent='관심 종목 분석 중…';return;}
   if(!watchList().length){box.innerHTML='<p class="note">관심 종목이 없습니다. 상단 별 버튼으로 추가하세요.</p>';return;}
+  // Selected-symbol snapshots can complete after a newer current-price update.
+  const selected=state.watch.find(w=>w?.s===state.data?.symbol);
+  if(state.ready&&selected&&bars.length&&!selected.err){selected.px=bars.at(-1).c;selected.priceAt=state.lastTick;}
   box.innerHTML=`<table><thead><tr><th>종목</th><th>가격</th><th>D / 4H</th><th>계획</th></tr></thead><tbody>${state.watch.filter(Boolean).map(w=>`<tr class="${w.s===state.sym?'current':''}"><td><button class="pick" data-sym="${w.s}">${w.s.replace(/USDT$/,'')}</button></td>${w.err?'<td colspan="3" class="warn">조회 실패</td>':`<td data-watchprice="${w.s}" title="가격 조회 ${clock(w.priceAt)} KST">${fmt(w.px)}</td><td class="watch-dir">${side(w.d)} / ${side(w.i)}</td><td>${w.plan?side(w.plan.dir):'<span class="muted">WAIT</span>'}</td>`}</tr>`).join('')}</tbody></table><p class="note">${state.watchLoaded?'분석 '+clock(state.watchAt)+' KST · 60초마다 갱신':'분석 갱신 중…'}<br>가격은 조회 시점 스냅샷 · 선택 종목만 실시간</p>`;
   for(const b of box.querySelectorAll('[data-sym]')) b.onclick=()=>switchSym(b.dataset.sym);
 }
@@ -246,6 +254,7 @@ function renderFutures() {
 }
 async function load(keepView=false) {
   clearTimeout(reconnectTimer);clearTimeout(refreshTimer);clearTimeout(liveUiTimer);liveUiTimer=null;
+  pricePollController?.abort();pricePollController=null;
   futuresController?.abort();
   const symbol=state.sym,timeframe=state.tf,view=keepView?chart.timeScale().getVisibleLogicalRange():null;
   const same=state.data?.symbol===symbol&&state.data?.timeframe===timeframe;
@@ -257,7 +266,7 @@ async function load(keepView=false) {
   setStatus('선물 데이터 연결 중');chartState('시장 데이터 확인 중',`${symbol} · ${timeframe} / 일봉·4H 마감 데이터`);
   try {
     const data=await selection.load(symbol,timeframe);if(!data) return;
-    state.data=data;state.ready=true;state.loading=false;state.lastTick=Date.now();bars=data.bars;
+    state.data=data;state.ready=true;state.loading=false;state.lastTick=Date.now();state.lastWsAt=0;state.transport='REST';bars=data.bars;
     result=analyze(data.h4,data.d1,Date.now());
     const precision=digits(bars.at(-1).c);candles.applyOptions({priceFormat:{type:'price',precision,minMove:10**-precision}});
     candles.setData(bars.map(toCandle));volume.setData(bars.map(toVolume));
@@ -268,18 +277,10 @@ async function load(keepView=false) {
     $('chartState').hidden=true;syncControls();setMode(null);notifyNew();
     setStatus('실시간 연결 중');
     selection.connect(data,{
-      open:()=>{state.lastTick=Date.now();setStatus('실시간','live');},
+      open:()=>setStatus('소켓 연결 · 시세 확인 중'),
       tick:(bar,closed)=>{
         if(!state.ready || !selection.current(data)) return;
-        const last=bars.at(-1);if(last&&bar.t<last.t) return;
-        const expected=TF_SEC[data.timeframe]*1000;
-        if(last&&bar.t>last.t+expected) {setStatus('누락 구간 복구 중','err');load(true);return;}
-        if(last&&bar.t===last.t) bars[bars.length-1]=bar;else bars.push(bar);
-        if(bars.length>5000){bars=bars.slice(-5000);candles.setData(bars.map(toCandle));volume.setData(bars.map(toVolume));}
-        else {candles.update(toCandle(bar));volume.update(toVolume(bar));}
-        state.lastTick=Date.now();setStatus('실시간','live');
-        renderLegend(null);checkAlerts(bar.c);queueLiveUi();
-        if(closed) scheduleRefresh(3000);
+        state.lastWsAt=Date.now();applyLiveBar(bar,closed,'WS');
       },
       close:()=>{if(!state.ready) return;setStatus('연결 끊김 · 데이터 복구 예정','err');reconnectTimer=setTimeout(()=>load(true),5000);},
       error:message=>setStatus(message,'err')
@@ -293,6 +294,28 @@ async function load(keepView=false) {
     $('panel').setAttribute('aria-busy','false');$('panel').innerHTML=`<section class="card"><h3>연결 오류</h3><p class="warn">${escapeHtml(message)}</p><p class="note">종목 철자와 네트워크를 확인하세요. 현물 데이터로 대체하지 않습니다.</p><button id="backBtc">BTCUSDT 열기</button></section>`;
     $('backBtc').onclick=()=>switchSym('BTCUSDT');$('decisionState').textContent='연결 오류';$('decisionReason').textContent='이전 차트 표시 중지 · 다시 연결하세요';$('decisionRisk').textContent='데이터 확인 전 판단 불가';
   }
+}
+function applyLiveBar(bar,closed,transport) {
+  const last=bars.at(-1);if(!state.ready||!last||bar.t<last.t) return;
+  const expected=TF_SEC[state.data.timeframe]*1000;
+  if(bar.t>last.t+expected){setStatus('누락 구간 복구 중','err');load(true);return;}
+  if(bar.t===last.t) bars[bars.length-1]=bar;else bars.push(bar);
+  if(bars.length>5000){bars=bars.slice(-5000);candles.setData(bars.map(toCandle));volume.setData(bars.map(toVolume));}
+  else{candles.update(toCandle(bar));volume.update(toVolume(bar));}
+  state.lastTick=Date.now();state.transport=transport;
+  setStatus(transport==='WS'?'실시간':'REST 보완 · 5초 갱신',transport==='WS'?'live':'');
+  updateLiveIndicators();renderLegend(null);checkAlerts(bar.c);queueLiveUi();
+  if(closed) scheduleRefresh(3000);
+}
+async function pollLatestPrice() {
+  if(!state.ready||state.loading||document.hidden||!navigator.onLine||pricePollController||Date.now()-state.lastWsAt<8000) return;
+  const data=state.data,controller=pricePollController=new AbortController();
+  try {
+    const latest=await selection.latest(data,controller.signal);
+    if(!latest||controller.signal.aborted||!state.ready||!selection.current(data)) return;
+    for(const bar of latest){if(!state.ready||!selection.current(data)) break;applyLiveBar(bar,bar.ct<Date.now(),'REST');}
+  } catch(error){if(!controller.signal.aborted&&selection.current(data)) setStatus('가격 조회 지연 · 재시도 중','err');}
+  finally{if(pricePollController===controller)pricePollController=null;}
 }
 function scheduleRefresh(ms) {clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>load(true),ms);}
 function focusSignal(time) {
@@ -308,19 +331,28 @@ function jumpSignal(time,module) {
 function switchSym(value) {
   const symbol=value.trim().toUpperCase();
   if(!/^[\p{L}\p{N}]{1,30}USDT$/u.test(symbol)) {$('sym').value=state.sym;return toast('USDT 무기한 심볼을 입력하세요 · 예: BTCUSDT');}
-  if(symbol===state.sym&&state.ready) return;
+  if(symbol===state.sym&&(state.ready||state.loading)) return;
   state.sym=symbol;pendingJump=null;store.set('omni-sym',symbol);syncControls();load();
 }
 $('symbolForm').onsubmit=e=>{e.preventDefault();switchSym($('sym').value);};
 $('sym').onchange=()=>switchSym($('sym').value);
 $('tf').onclick=e=>{const tf=e.target.dataset.tf;if(!TF_SEC[tf]||tf===state.tf&&state.ready)return;state.tf=tf;pendingJump=null;store.set('omni-tf',tf);syncControls();load();};
-$('layers').onchange=e=>{const key=e.target.dataset.layer;if(!Object.hasOwn(LAYER_DEFAULT,key))return;state.layers[key]=e.target.checked;store.set('angel-layers-v3',state.layers);if(state.ready)render();};
+$('layers').onchange=e=>{const key=e.target.dataset.layer;if(!Object.hasOwn(LAYER_DEFAULT,key))return;state.layers[key]=e.target.checked;store.set('angel-layers-v3',state.layers);syncControls();if(state.ready)render();};
 $('presets').onclick=e=>{
   const preset=e.target.dataset.preset;if(!preset)return;
   const enabled=preset==='focus'?['signals','plans','levels','zone','volume','mine']:preset==='structure'?['signals','plans','trend','shortTrend','levels','sr','fib','zone','volume','mine']:Object.keys(LAYER_DEFAULT);
   state.layers=Object.fromEntries(Object.keys(LAYER_DEFAULT).map(k=>[k,enabled.includes(k)]));store.set('angel-layers-v3',state.layers);syncControls();if(state.ready)render();toast(`${preset==='focus'?'집중':preset==='structure'?'구조':'전체'} 레이어 적용`);
 };
 document.addEventListener('click',e=>{if(!$('layerMenu').contains(e.target))$('layerMenu').open=false;});
+$('closeLayers').onclick=()=>{$('layerMenu').open=false;document.querySelector('#layerMenu summary').focus();};
+function positionLayerMenu(){
+  if(!$('layerMenu').open||!matchMedia('(max-width:900px)').matches)return;
+  const menu=document.querySelector('#layerMenu .menu'),anchor=document.querySelector('#layerMenu summary').getBoundingClientRect();
+  const top=Math.min(anchor.bottom+8,Math.max(8,innerHeight-menu.offsetHeight-12));
+  menu.style.setProperty('--menu-top',`${top}px`);
+}
+$('layerMenu').addEventListener('toggle',positionLayerMenu);
+window.addEventListener('resize',positionLayerMenu);
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){setMode(null);$('layerMenu').open=false;return;}
   if(e.ctrlKey||e.metaKey||e.altKey||/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable)return;
@@ -329,16 +361,18 @@ document.addEventListener('keydown',e=>{
   if(e.key.toLowerCase()==='h'&&state.ready)setMode('line');
 });
 $('retry').onclick=()=>load();
+document.querySelector('.skip').onclick=()=>$('panel').focus({preventScroll:true});
 const layoutObserver=new ResizeObserver(()=>document.documentElement.style.setProperty('--chrome-height',`${Math.ceil($('header').getBoundingClientRect().height+document.querySelector('.toolbar').getBoundingClientRect().height+$('decision').getBoundingClientRect().height)}px`));
 for(const el of [$('header'),document.querySelector('.toolbar'),$('decision')])layoutObserver.observe(el);
 setInterval(()=>{
   const now=Date.now();if($('cd4'))$('cd4').textContent=countdown(H4);if($('cd1'))$('cd1').textContent=countdown(DAY);
   if($('fundingCountdown')&&state.futures?.premium)$('fundingCountdown').textContent=duration(+state.futures.premium.nextFundingTime-now);
-  if(state.ready){const age=Math.floor((now-state.lastTick)/1000);$('lastTick').textContent=`마지막 수신 ${age}초 전 · KST`;if(age>30)setStatus('시세 지연 · 마지막 수신 확인','err');if(age>60&&!state.loading)load(true);}
+  if(state.ready){const age=Math.floor((now-state.lastTick)/1000);$('lastTick').textContent=`마지막 수신 ${age}초 전 · ${state.transport==='WS'?'WebSocket':'REST'} · KST`;if(age>30){setStatus('시세 지연 · 마지막 수신 확인','err');updateSummary();}if(age>60&&!state.loading&&navigator.onLine)load(true);}
 },1000);
+setInterval(pollLatestPrice,5000);
 setInterval(()=>{if(state.ready&&!document.hidden)loadFutures();},30000);
 setInterval(()=>{if(!document.hidden)loadWatch();},60000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(state.ready&&Date.now()-state.lastTick>15000)load(true);loadWatch();loadFutures();}});
 window.addEventListener('online',()=>{if(!state.loading)load(true);});
 window.addEventListener('offline',()=>setStatus('오프라인 · 시세 감시 일시 중지','err'));
-if(typeof LightweightCharts==='undefined'){chartState('차트 라이브러리 로딩 실패','네트워크 연결을 확인한 뒤 새로고침하세요',true);}else{syncControls();load();loadWatch();loadSymbols();}
+if(typeof LightweightCharts==='undefined'){chartState('차트 라이브러리 로딩 실패','네트워크 연결을 확인한 뒤 새로고침하세요',true);}else{syncControls();load();loadWatch();loadSymbols();window.angelAreumStarted=true;}

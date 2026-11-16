@@ -21,3 +21,6 @@ const savedSymbol=store.get('omni-sym','BTCUSDT'),savedTf=store.get('omni-tf','4
 const state={sym:/^[\p{L}\p{N}]{1,30}USDT$/u.test(savedSymbol)?savedSymbol:'BTCUSDT',tf:TF_SEC[savedTf]?savedTf:'4h',layers:{...LAYER_DEFAULT,...store.get('angel-layers-v3',{})},ws:null,timer:null,src:'fapi',mode:null,watch:[],watchLoaded:false,watchAt:0,data:null,ready:false,loading:false,auto:store.get('angel-auto',true)!==false,lastTick:0,futures:null,selection:0,history:false,undo:null};
 const client=new AngelMarket.MarketClient();
 const selection=new AngelMarket.Selection(client);
+state.lastWsAt=0;
+state.transport='REST';
+state.crosshairTime=null;
