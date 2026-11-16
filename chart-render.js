@@ -1,5 +1,5 @@
 function analyzeChart(now) {
-  const cb = bars.filter(b => b.ct < now), atr = wilderAtr(cb, 14), a = atr.at(-1);
+  const cb = contiguousTail(bars.filter(b => b.ct < now),TF_SEC[state.tf]*1000), atr = wilderAtr(cb, 14), a = atr.at(-1);
   const local = localLevels(cb, SR_PRD[state.tf], atr);
   const fib = fibAnchors(cb);
   const fibUseful = fib && a && fib.hi - fib.lo >= a;
@@ -37,18 +37,45 @@ const resLine = chart.addLineSeries({ ...lineOpts, color: "#ff7189", lineWidth: 
 const stSupLine = chart.addLineSeries({ ...lineOpts, color: "#35e0bd", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed });
 const stResLine = chart.addLineSeries({ ...lineOpts, color: "#ff7189", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed });
 const sqLine = chart.addLineSeries({ ...lineOpts, color: "#a855f7", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted });
-const srSeries = [0, 1, 2, 3].map(() => chart.addLineSeries({ ...lineOpts, lineWidth: 2, lastValueVisible: true }));
+const srSeries = [0, 1, 2, 3].map(() => chart.addLineSeries({ ...lineOpts, lineWidth: 2, lastValueVisible: false }));
 const fibSeries = [0, 1].map(() => chart.addLineSeries({ ...lineOpts, color: "#f6ce7e", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: true }));
 let priceLines = [];
 let bars = [], result = null, local = null;
+let axisCandidates=[],axisLabels=[],axisFrame=null;
+function clearAxisCaptions(){for(const line of axisLabels)candles.removePriceLine(line);axisLabels=[];axisCandidates=[];}
+function scheduleAxisCaptions(){if(axisFrame==null)axisFrame=requestAnimationFrame(updateAxisCaptions);}
+function updateAxisCaptions(){
+  axisFrame=null;for(const line of axisLabels)candles.removePriceLine(line);axisLabels=[];
+  if(!state.ready||!bars.length)return;
+  const top=candles.coordinateToPrice(0),near=candles.coordinateToPrice(26);
+  const tolerance=top!=null&&near!=null?Math.abs(top-near):(local?.atr||bars.at(-1).c*.005);
+  const visible=axisCandidates.filter(level=>{const y=candles.priceToCoordinate(level.p);return y!=null&&y>=0&&y<=$('chart').clientHeight;});
+  const groups=groupAxisLevels(visible,bars.at(-1).c,tolerance);
+  for(const group of groups){
+    const text=group.side==='res'?'저항':'지지',count=group.items.length;
+    const title=count>1?`${text} ×${count}`:group.items[0].title;
+    axisLabels.push(candles.createPriceLine({price:group.p,color:group.side==='res'?'#ff7189':'#35e0bd',lineVisible:false,axisLabelVisible:true,title}));
+  }
+  if($('axisGroups'))$('axisGroups').textContent=groups.filter(g=>g.items.length>1).map(g=>`${g.side==='res'?'저항':'지지'} ${g.items.length}개 묶음: ${price(g.low)}–${price(g.high)} (${g.items.map(v=>v.title).join(' / ')})`).join(' · ');
+}
+chart.timeScale().subscribeVisibleLogicalRangeChange(scheduleAxisCaptions);
+new ResizeObserver(scheduleAxisCaptions).observe($('chart'));
+$('chart').addEventListener('pointerup',scheduleAxisCaptions);
+$('chart').addEventListener('wheel',scheduleAxisCaptions,{passive:true});
+function applyPriceFormat(meta){
+  const precision=tickPrecision(meta?.tickSize)??digits(bars.at(-1).c),minMove=Number(meta?.tickSize)||10**-precision;
+  const priceFormat={type:'price',precision,minMove};
+  for(const series of [candles,supLine,resLine,stSupLine,stResLine,sqLine,...srSeries,...fibSeries,...Object.values(emaSeries).map(e=>e.s)])series.applyOptions({priceFormat});
+}
 
 function toCandle(b) { return { time: sec(b.t), open: b.o, high: b.h, low: b.l, close: b.c }; }
 function toVolume(b) { return { time: sec(b.t), value: b.v, color: b.c >= b.o ? "rgba(20,184,166,.35)" : "rgba(239,68,68,.35)" }; }
 
 function updateLiveIndicators() {
   const last=bars.at(-1);if(!last) return;
+  const continuous=contiguousTail(bars,TF_SEC[state.data.timeframe]*1000);
   for(const [key,e] of Object.entries(emaSeries)) {
-    if(state.layers[key] && bars.length>e.n) e.s.update({time:sec(last.t),value:ema(bars,e.n).at(-1)});
+    if(state.layers[key] && continuous.length>e.n) e.s.update({time:sec(last.t),value:ema(continuous,e.n).at(-1)});
   }
 }
 
@@ -73,7 +100,7 @@ function render() {
     const time = barAt(e.t); if (time == null) continue;
     markers.push(e.type === "entry" ? { time, position: "belowBar", shape: "circle", color: "#a855f7", text: "SQ" } : { time, position: "aboveBar", shape: "square", color: "#a855f7", text: "SQ 청산" });
   }
-  if (L.trend && showDaily) for (const [tl, text, pos, color] of [[r.trendSup, "장기 지지 이탈", "aboveBar", "#14b8a6"], [r.trendRes, "장기 저항 돌파", "belowBar", "#ef4444"]]) {
+  if (L.trend && showDaily) for (const [tl, text, pos, color] of [[r.trendSup, "장기 지지 이탈", "aboveBar", "#ff657f"], [r.trendRes, "장기 저항 돌파", "belowBar", "#25cfac"]]) {
     if (!tl || !tl.broken) continue;
     const time = barAt(tl.breakT + DAY); if (time != null) markers.push({ time, position: pos, shape: pos === "aboveBar" ? "arrowDown" : "arrowUp", color, text });
   }
@@ -82,8 +109,8 @@ function render() {
 
   for (const pl of priceLines) candles.removePriceLine(pl);
   priceLines = [];
-  const addLine = (price, color, title, style = LightweightCharts.LineStyle.Solid, width = 1) =>
-    priceLines.push(candles.createPriceLine({ price, color, title, lineStyle: style, lineWidth: width, axisLabelVisible: true }));
+  const addLine = (price, color, title, style = LightweightCharts.LineStyle.Solid, width = 1, axisLabelVisible=true) =>
+    priceLines.push(candles.createPriceLine({ price, color, title, lineStyle: style, lineWidth: width, axisLabelVisible }));
   if (L.plans) for (const p of [r.dailyPlan, r.ichiPlan]) {
     if (!p || p.state !== "진행" || (p.mod === "4H" && !show4h) || (p.mod === "일봉" && !showDaily)) continue;
     addLine(p.sl, p.mod === "일봉" ? "#ef4444" : "#f97316", `${p.mod} 손절`, LightweightCharts.LineStyle.Solid, p.mod === "일봉" ? 2 : 1);
@@ -91,8 +118,8 @@ function render() {
   }
   const px = bars.at(-1).c, near = nearest(r.levels, px), lastT = bars.at(-1).t;
   if (L.levels) {
-    if (near.res) addLine(near.res.p, "#ff7189", `${near.res.label} 저항`, LightweightCharts.LineStyle.Dashed, 2);
-    if (near.sup) addLine(near.sup.p, "#35e0bd", `${near.sup.label} 지지`, LightweightCharts.LineStyle.Dashed, 2);
+    if (near.res) addLine(near.res.p, "#ff7189", `${near.res.label} 저항`, LightweightCharts.LineStyle.Dashed, 2,false);
+    if (near.sup) addLine(near.sup.p, "#35e0bd", `${near.sup.label} 지지`, LightweightCharts.LineStyle.Dashed, 2,false);
   }
   if (L.mine) for (const p of readDrawings('line')) addLine(p, "#79bfff", "내 선", LightweightCharts.LineStyle.Solid, 2);
   for (const a of readDrawings('alert')) addLine(a.p, "#f4cc79", "알림", LightweightCharts.LineStyle.SparseDotted, 2);
@@ -100,21 +127,23 @@ function render() {
   const trendData = tl => !L.trend || !tl || !showDaily ? [] : segment(Math.max(tl.t1, bars[0].t), tl.broken ? tl.breakT : lastT, tl.at(Math.max(tl.t1, bars[0].t)), tl.at(tl.broken ? tl.breakT : lastT));
   supLine.setData(trendData(r.trendSup));
   resLine.setData(trendData(r.trendRes));
-  supLine.applyOptions({ color: r.trendSup && r.trendSup.broken ? "rgba(53,224,189,.55)" : "#35e0bd", lineStyle: r.trendSup?.broken ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid });
-  resLine.applyOptions({ color: r.trendRes && r.trendRes.broken ? "rgba(255,113,137,.55)" : "#ff7189", lineStyle: r.trendRes?.broken ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid });
+  supLine.applyOptions({ color: r.trendSup && r.trendSup.broken ? "rgba(255,113,137,.55)" : "#35e0bd", lineStyle: r.trendSup?.broken ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid });
+  resLine.applyOptions({ color: r.trendRes && r.trendRes.broken ? "rgba(53,224,189,.55)" : "#ff7189", lineStyle: r.trendRes?.broken ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid });
   sqLine.setData(L.sq && r.sq.on && show4h ? segment(lastT - 20 * H4, lastT, r.sq.basis, r.sq.basis) : []);
 
+  const continuous=contiguousTail(bars,tfSec*1000);
   for (const k in emaSeries) {
     const e = emaSeries[k];
-    if (!L[k] || bars.length < e.n) { e.s.setData([]); continue; }
-    const v = ema(bars, e.n);
-    e.s.setData(bars.slice(e.n).map((b, i) => ({ time: sec(b.t), value: v[i + e.n] })));
+    if (!L[k] || continuous.length < e.n) { e.s.setData([]); continue; }
+    const v = ema(continuous, e.n);
+    e.s.setData(continuous.slice(e.n).map((b, i) => ({ time: sec(b.t), value: v[i + e.n] })));
   }
   volume.applyOptions({ visible: L.volume });
 
   local = analyzeChart(Date.now());
   // 지지·저항: 2회 이상 확인된 강한 레벨은 굵은 실선, 1회 레벨은 옅은 점선으로 모두 그린다.
   const srLevels = L.sr ? local.local : [];
+  axisCandidates=[...(L.levels?[near.res,near.sup].filter(Boolean).map(lv=>({p:lv.p,title:`${lv.label} ${lv.p>=px?'저항':'지지'}`})):[]),...srLevels.map(lv=>({p:lv.p,title:`${lv.p>=px?'저항':'지지'} ${lv.touches}회`}))];
   srSeries.forEach((s, k) => {
     const lv = srLevels[k];
     if (!lv) { s.setData([]); return; }
@@ -122,15 +151,15 @@ function render() {
     s.applyOptions({
       color: res ? (strongLv ? "#ff7189" : "rgba(255,113,137,.7)") : (strongLv ? "#35e0bd" : "rgba(53,224,189,.7)"),
       lineWidth: strongLv ? 3 : 2, lineStyle: strongLv ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dotted,
-      title: `${res ? "저항" : "지지"} ${lv.touches}회`,
+      title: "",
     });
     s.setData(segment(Math.max(lv.t, bars[0].t), lastT, lv.p, lv.p));
   });
   const shortData = t => !L.shortTrend || !t ? [] : segment(Math.max(t.t1, bars[0].t), t.broken ? t.breakT : lastT, t.at(Math.max(t.t1, bars[0].t)), t.at(t.broken ? t.breakT : lastT));
   stSupLine.setData(shortData(local.shortSup));
   stResLine.setData(shortData(local.shortRes));
-  stSupLine.applyOptions({ color: local.shortSup && local.shortSup.broken ? "rgba(53,224,189,.5)" : "#35e0bd",lineWidth: local.shortSup?.broken?2:3 });
-  stResLine.applyOptions({ color: local.shortRes && local.shortRes.broken ? "rgba(255,113,137,.5)" : "#ff7189",lineWidth: local.shortRes?.broken?2:3 });
+  stSupLine.applyOptions({ color: local.shortSup && local.shortSup.broken ? "rgba(255,113,137,.5)" : "#35e0bd",lineWidth: local.shortSup?.broken?2:3 });
+  stResLine.applyOptions({ color: local.shortRes && local.shortRes.broken ? "rgba(53,224,189,.5)" : "#ff7189",lineWidth: local.shortRes?.broken?2:3 });
   const fib = L.fib ? local.fib : null;
   fibSeries.forEach((s, k) => {
     if (!fib) { s.setData([]); return; }
@@ -147,6 +176,7 @@ function render() {
   renderPanel(near);
   updateSummary();
   renderLegend(null);
+  scheduleAxisCaptions();
 }
 
 // ---------- 범례 ----------
@@ -156,6 +186,6 @@ function renderLegend(time) {
   const b = selectedTime == null ? bars.at(-1) : bars.find(x => sec(x.t) === selectedTime) || bars.at(-1);
   if (!b) return;
   const chg = pct(b.c, b.o), cls = b.c >= b.o ? "L" : "S";
-  $("legend").innerHTML = `${state.data.symbol} · ${state.data.timeframe} · ${"USDT 무기한"} &nbsp; 시 <b>${fmt(b.o)}</b> 고 <b>${fmt(b.h)}</b> 저 <b>${fmt(b.l)}</b> 종 <b class="${cls}">${fmt(b.c)}</b> <span class="${cls}">${sgn(chg)}%</span> · ${kst(b.t)}`;
+  $("legend").innerHTML = `${state.data.symbol} · ${state.data.timeframe} · ${"USDT 무기한"} &nbsp; 시 <b>${price(b.o)}</b> 고 <b>${price(b.h)}</b> 저 <b>${price(b.l)}</b> 종 <b class="${cls}">${price(b.c)}</b> <span class="${cls}">${sgn(chg)}%</span> · ${kst(b.t)}`;
 }
 chart.subscribeCrosshairMove(p => { state.crosshairTime=p && p.time != null ? p.time : null; renderLegend(state.crosshairTime); });

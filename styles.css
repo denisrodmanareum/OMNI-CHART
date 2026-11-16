@@ -8,3 +8,7 @@
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 
 .menu-heading button{min-height:30px;padding:3px 8px;font-size:11px}
+
+.notice-history{margin-top:12px}.notice-history summary{font-size:11px;min-height:30px}.notice-entry{padding:9px 0;border-bottom:1px solid var(--line);font-size:11px}.notice-entry small{display:block;color:var(--muted)}.notice-entry p{margin:4px 0}.notice-history #noticeHistory{max-height:220px;overflow:auto}.toast{max-height:40dvh;overflow:auto}#toastMessage{white-space:pre-line}
+
+#axisGroups{overflow-wrap:anywhere}

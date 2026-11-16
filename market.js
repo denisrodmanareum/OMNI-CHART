@@ -2,8 +2,14 @@
 (function(root) {
 "use strict";
 class MarketClient {
-  constructor(fetcher = (...args) => fetch(...args)) { this.fetcher = fetcher; }
+  constructor(fetcher = (...args) => fetch(...args)) { this.fetcher = fetcher; this.cooldownUntil=0; this.throttleStrikes=0; this.symbolMeta=new Map(); this.info=null; this.infoAt=0; this.infoPromise=null; }
+  cooldownError(status=429) {
+    const error=new Error('거래소 조회 제한 · 잠시 후 자동 재시도');
+    error.status=status;error.retryAfterMs=Math.max(0,this.cooldownUntil-Date.now());error.retryAt=this.cooldownUntil;
+    return error;
+  }
   async json(path, signal) {
+    if(Date.now()<this.cooldownUntil)throw this.cooldownError();
     const controller = new AbortController();
     const abort = () => controller.abort();
     if (signal?.aborted) controller.abort();
@@ -11,11 +17,31 @@ class MarketClient {
     const timeout = setTimeout(abort, 12000);
     try {
       const response = await this.fetcher('https://fapi.binance.com' + path, {signal:controller.signal});
+      if(response.status===429||response.status===418){
+        const header=response.headers?.get?.('retry-after');
+        const parsed=header?Number(header):NaN;
+        const server=Number.isFinite(parsed)?parsed*1000:header?Math.max(0,Date.parse(header)-Date.now()):0;
+        const wait=Math.max(server||0,response.status===418?900000:Math.min(900000,60000*2**this.throttleStrikes++));
+        this.cooldownUntil=Math.max(this.cooldownUntil,Date.now()+wait);
+        throw this.cooldownError(response.status);
+      }
       if (!response.ok) throw new Error(response.status === 429 || response.status === 418 ? '조회 제한 · 잠시 후 다시 시도하세요' : response.status === 400 ? '지원하지 않는 USDT 무기한 종목이거나 요청이 유효하지 않습니다' : `선물 데이터 응답 오류 (${response.status})`);
       const data = await response.json();
       if (data?.code < 0) throw new Error('지원하지 않는 USDT 무기한 종목입니다');
+      if(this.cooldownUntil&&Date.now()>=this.cooldownUntil)this.throttleStrikes=0;
       return data;
     } finally { clearTimeout(timeout); signal?.removeEventListener('abort',abort); }
+  }
+  async exchangeInfo(){
+    if(this.info&&Date.now()-this.infoAt<3600000)return this.info;
+    if(this.infoPromise)return this.infoPromise;
+    this.infoPromise=this.json('/fapi/v1/exchangeInfo').then(info=>{
+      if(!Array.isArray(info.symbols))throw new Error('거래소 호가 단위 정보를 읽지 못했습니다');
+      this.info=info;this.infoAt=Date.now();
+      for(const item of info.symbols){const tick=item.filters?.find(f=>f.filterType==='PRICE_FILTER')?.tickSize;if(Number(tick)>0)this.symbolMeta.set(item.symbol,{tickSize:tick,pricePrecision:item.pricePrecision});}
+      return info;
+    }).finally(()=>{this.infoPromise=null;});
+    return this.infoPromise;
   }
   async klines(symbol, interval, {limit=1500, signal, startTime, endTime}={}) {
     if (!/^[\p{L}\p{N}]{1,30}USDT$/u.test(symbol)) throw new Error('USDT 무기한 심볼을 확인하세요');
@@ -32,9 +58,10 @@ class MarketClient {
   }
   async snapshot(symbol,timeframe,signal) {
     const frames=[...new Set([timeframe,'4h','1d'])];
-    const rows=await Promise.all(frames.map(tf=>this.klines(symbol,tf,{signal})));
+    const [rows]=await Promise.all([Promise.all(frames.map(tf=>this.klines(symbol,tf,{signal}))),this.exchangeInfo()]);
     const map=new Map(frames.map((tf,i)=>[tf,rows[i]]));
-    return {symbol,timeframe,market:'USDT-PERP',bars:map.get(timeframe),h4:map.get('4h'),d1:map.get('1d'),receivedAt:Date.now()};
+    const meta=this.symbolMeta.get(symbol);if(!meta)throw new Error('해당 종목의 거래소 호가 단위를 확인하지 못했습니다');
+    return {symbol,timeframe,market:'USDT-PERP',bars:map.get(timeframe),h4:map.get('4h'),d1:map.get('1d'),receivedAt:Date.now(),meta};
   }
   async futures(symbol,signal) {
     const query='?symbol='+encodeURIComponent(symbol);
@@ -62,6 +89,11 @@ class Selection {
     } catch(error) { if(version!==this.version) return null; throw error; }
   }
   current(data) { return data && data.version===this.version; }
+  async refresh(data,signal){
+    if(!this.current(data))return null;
+    try{const next=await this.client.snapshot(data.symbol,data.timeframe,signal);if(!this.current(data))return null;this.tickVersion++;return {...next,version:data.version};}
+    catch(error){if(!this.current(data))return null;throw error;}
+  }
   async latest(data,signal) {
     if(!this.current(data)) return null;
     const ticks=this.tickVersion;

@@ -73,7 +73,7 @@ test('closed/replaced socket and incorrect market identity cannot update current
 test('futures failure never falls back to spot and snapshot frame requests are deduplicated',async()=>{
   const urls=[];const client=new MarketClient(async url=>{urls.push(url);return {ok:false,status:503};});
   await assert.rejects(client.snapshot('BTCUSDT','4h'),/503/);
-  assert.equal(urls.length,2);assert.ok(urls.every(url=>url.startsWith('https://fapi.binance.com/')));
+  assert.equal(urls.filter(url=>url.includes('/klines?')).length,2);assert.ok(urls.every(url=>url.startsWith('https://fapi.binance.com/')));
 });
 test('malformed or unordered candles are rejected',async()=>{
   const client=new MarketClient(async()=>({ok:true,json:async()=>[[2,'100','90','95','100','2',3]]}));

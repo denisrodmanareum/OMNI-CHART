@@ -1,5 +1,5 @@
 "use strict";
-const {wilderAtr,ema,stopPct,dailySignals,ichiSignals,combine,runPlan,squeeze,longTrend,weekly,levelsOf,nearest,runLength,analyze,localLevels,fibAnchors,pickZone,eventBar,candleRange,candleTimeRange}=AngelCore;
+const {wilderAtr,ema,stopPct,dailySignals,ichiSignals,combine,runPlan,squeeze,longTrend,weekly,levelsOf,nearest,runLength,analyze,localLevels,fibAnchors,pickZone,eventBar,candleRange,candleTimeRange,tickPrecision,roundToTick,formatPrice,mergeRefreshBars,groupAxisLevels,contiguousTail}=AngelCore;
 const H=3600e3,H4=4*H,DAY=24*H,HOLD=72*H,MAX_STOP=10,KST=9*3600;
 const TF_SEC={'15m':900,'1h':3600,'4h':14400,'1d':86400,'1w':604800};
 const SR_PRD={'15m':8,'1h':10,'4h':12,'1d':15,'1w':15};
@@ -13,6 +13,7 @@ const fmt=value=>value==null||!Number.isFinite(value)?'—':value.toLocaleString
 const pct=(p,ref)=>(p/ref-1)*100;
 const sgn=value=>(value>=0?'+':'')+value.toFixed(2);
 const kst=t=>new Date(t+KST*1000).toISOString().slice(5,16).replace('T',' ');
+const fullKst=t=>new Date(t+KST*1000).toISOString().slice(0,16).replace('T',' ');
 const clock=t=>new Date(t).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour12:false});
 const usd=v=>Number.isFinite(v)?v>=1e9?(v/1e9).toFixed(2)+'B':v>=1e6?(v/1e6).toFixed(2)+'M':fmt(v):'—';
 // Keep legacy storage keys so existing drawings and watchlists survive the rename.
@@ -21,6 +22,10 @@ const savedSymbol=store.get('omni-sym','BTCUSDT'),savedTf=store.get('omni-tf','4
 const state={sym:/^[\p{L}\p{N}]{1,30}USDT$/u.test(savedSymbol)?savedSymbol:'BTCUSDT',tf:TF_SEC[savedTf]?savedTf:'4h',layers:{...LAYER_DEFAULT,...store.get('angel-layers-v3',{})},ws:null,timer:null,src:'fapi',mode:null,watch:[],watchLoaded:false,watchAt:0,data:null,ready:false,loading:false,auto:store.get('angel-auto',true)!==false,lastTick:0,futures:null,selection:0,history:false,undo:null};
 const client=new AngelMarket.MarketClient();
 const selection=new AngelMarket.Selection(client);
+const price=(value,symbol=state.sym)=>formatPrice(value,client.symbolMeta.get(symbol)?.tickSize);
 state.lastWsAt=0;
 state.transport='REST';
 state.crosshairTime=null;
+state.refreshing=false;state.analysisStale=false;state.liveRevision=0;
+
+state.notices=[];

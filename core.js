@@ -65,13 +65,17 @@ function combine(daily, ichi) {
 
 // 계획 결과: 시가에 만료·교체, 봉 마감에 손절 우선 판정. 손절 -1R, 익절 +2R, 만료·교체는 그 시가 기준 R.
 function runPlan(sig, h4, nextT, now) {
-  let k = h4.findIndex(b => b.t >= sig.t);
-  if (k < 0) return { ...sig, state: "대기" };
+  if (!h4.length || sig.t < h4[0].t) return { ...sig, state: "범위 밖" };
+  let k = h4.findIndex(b => b.t === sig.t);
+  if (k < 0) return { ...sig, state: sig.t > h4.at(-1).t ? "대기" : "범위 밖" };
   const ref = h4[k].o, sl = ref * (1 - sig.dir * sig.stop / 100), tp = ref * (1 + sig.dir * 2 * sig.stop / 100);
   const risk = Math.abs(ref - sl);
   const plan = { ...sig, ref, sl, tp };
+  let previousT = null;
   for (; k < h4.length; k++) {
     const b = h4[k];
+    if (previousT != null && b.t !== previousT + H4) return { ...sig, state: "범위 밖" };
+    previousT = b.t;
     if (b.t >= nextT) return { ...plan, state: "교체", end: b.t, r: sig.dir * (b.o - ref) / risk };
     if (b.t - sig.t >= HOLD) return { ...plan, state: "만료", end: b.t, r: sig.dir * (b.o - ref) / risk };
     if (b.ct >= now) break;
@@ -80,7 +84,7 @@ function runPlan(sig, h4, nextT, now) {
     if (hitSl) return { ...plan, state: "손절", end: b.t, r: -1 };
     if (hitTp) return { ...plan, state: "익절", end: b.t, r: 2 };
   }
-  return { ...plan, state: now - sig.t >= HOLD ? "만료" : "진행" };
+  return now - sig.t >= HOLD ? { ...sig, state: "범위 밖" } : { ...plan, state: "진행" };
 }
 
 function squeeze(h4) {
@@ -264,7 +268,44 @@ function candleTimeRange(bars,from,to) {
   const visible=bars.filter(b=>b.t>=from && b.t<=to);
   return candleRange(visible,{from:0,to:visible.length-1});
 }
-const api={wilderAtr,ema,stopPct,dailySignals,ichiSignals,combine,runPlan,squeeze,longTrend,weekly,levelsOf,nearest,runLength,analyze,localLevels,fibAnchors,pickZone,eventBar,candleRange,candleTimeRange};
+function tickPrecision(tickSize){
+  const tick=Number(tickSize);if(!(tick>0))return null;
+  const normalized=tick.toFixed(12).replace(/0+$/,'').replace(/\.$/,'');
+  return normalized.includes('.')?normalized.split('.')[1].length:0;
+}
+function roundToTick(value,tickSize){
+  const tick=Number(tickSize),precision=tickPrecision(tickSize);
+  if(!Number.isFinite(value)||!(tick>0))return value;
+  return Number((Math.round((value+Number.EPSILON*Math.abs(value))/tick)*tick).toFixed(precision));
+}
+function formatPrice(value,tickSize){
+  if(!Number.isFinite(value))return '—';
+  const precision=tickPrecision(tickSize);
+  return roundToTick(value,tickSize).toLocaleString('en-US',precision==null?{maximumFractionDigits:12}:{minimumFractionDigits:precision,maximumFractionDigits:precision});
+}
+function mergeRefreshBars(fetched,current,since,preserveRange=null){
+  const map=new Map(fetched.map(b=>[b.t,b]));
+  for(const bar of current){
+    if(bar.t>=since)map.set(bar.t,bar);
+    else if(preserveRange&&bar.t>=preserveRange.from&&bar.t<=preserveRange.to&&!map.has(bar.t))map.set(bar.t,bar);
+  }
+  return [...map.values()].sort((a,b)=>a.t-b.t).slice(-5000);
+}
+function groupAxisLevels(levels,px,tolerance){
+  const groups=[];
+  for(const level of [...levels].filter(v=>Number.isFinite(v.p)&&v.p>0).sort((a,b)=>a.p-b.p)){
+    const side=level.p>=px?'res':'sup',last=groups.at(-1);
+    if(last&&last.side===side&&level.p-last.high<=tolerance){last.items.push(level);last.high=level.p;if(side==='sup')last.p=level.p;}
+    else groups.push({side,p:level.p,low:level.p,high:level.p,items:[level]});
+  }
+  return groups;
+}
+function contiguousTail(bars,step){
+  if(!bars.length||!(step>0))return bars;
+  let start=bars.length-1;while(start>0&&bars[start].t-bars[start-1].t===step)start--;
+  return bars.slice(start);
+}
+const api={wilderAtr,ema,stopPct,dailySignals,ichiSignals,combine,runPlan,squeeze,longTrend,weekly,levelsOf,nearest,runLength,analyze,localLevels,fibAnchors,pickZone,eventBar,candleRange,candleTimeRange,tickPrecision,roundToTick,formatPrice,mergeRefreshBars,groupAxisLevels,contiguousTail};
 if(typeof module!=="undefined" && module.exports) module.exports=api;
 else root.AngelCore=api;
 })(typeof globalThis!=="undefined" ? globalThis : this);
