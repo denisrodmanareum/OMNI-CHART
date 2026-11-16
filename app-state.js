@@ -1,0 +1,23 @@
+"use strict";
+const {wilderAtr,ema,stopPct,dailySignals,ichiSignals,combine,runPlan,squeeze,longTrend,weekly,levelsOf,nearest,runLength,analyze,localLevels,fibAnchors,pickZone,eventBar,candleRange,candleTimeRange}=AngelCore;
+const H=3600e3,H4=4*H,DAY=24*H,HOLD=72*H,MAX_STOP=10,KST=9*3600;
+const TF_SEC={'15m':900,'1h':3600,'4h':14400,'1d':86400,'1w':604800};
+const SR_PRD={'15m':8,'1h':10,'4h':12,'1d':15,'1w':15};
+const WATCH_DEFAULT=['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT'];
+const LAYER_DEFAULT={signals:true,plans:true,sq:false,trend:true,shortTrend:true,levels:true,sr:true,fib:true,zone:true,ema20:false,ema50:false,ema200:false,volume:true,mine:true};
+const $=id=>document.getElementById(id);
+const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const sec=t=>Math.floor(t/1000)+KST;
+const digits=value=>{const a=Math.abs(value);return a>=1000?1:a>=1?3:a>0?Math.min(12,Math.ceil(-Math.log10(a))+3):2;};
+const fmt=value=>value==null||!Number.isFinite(value)?'—':value.toLocaleString('en-US',{maximumFractionDigits:digits(value)});
+const pct=(p,ref)=>(p/ref-1)*100;
+const sgn=value=>(value>=0?'+':'')+value.toFixed(2);
+const kst=t=>new Date(t+KST*1000).toISOString().slice(5,16).replace('T',' ');
+const clock=t=>new Date(t).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour12:false});
+const usd=v=>Number.isFinite(v)?v>=1e9?(v/1e9).toFixed(2)+'B':v>=1e6?(v/1e6).toFixed(2)+'M':fmt(v):'—';
+// Keep legacy storage keys so existing drawings and watchlists survive the rename.
+const store={get(k,fallback=null){try{const v=localStorage.getItem(k);return v==null?fallback:JSON.parse(v);}catch{return fallback;}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true;}catch{return false;}}};
+const savedSymbol=store.get('omni-sym','BTCUSDT'),savedTf=store.get('omni-tf','4h');
+const state={sym:/^[\p{L}\p{N}]{1,30}USDT$/u.test(savedSymbol)?savedSymbol:'BTCUSDT',tf:TF_SEC[savedTf]?savedTf:'4h',layers:{...LAYER_DEFAULT,...store.get('angel-layers-v3',{})},ws:null,timer:null,src:'fapi',mode:null,watch:[],watchLoaded:false,watchAt:0,data:null,ready:false,loading:false,auto:store.get('angel-auto',true)!==false,lastTick:0,futures:null,selection:0,history:false,undo:null};
+const client=new AngelMarket.MarketClient();
+const selection=new AngelMarket.Selection(client);
