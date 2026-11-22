@@ -1,0 +1,16 @@
+{
+  "name": "AngelAreum · Futures Terminal",
+  "short_name": "AngelAreum",
+  "description": "USDT 무기한 선물 차트, 구조 분석과 위험 우선 판단 도구",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#090d16",
+  "theme_color": "#090d16",
+  "lang": "ko",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+    {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml"}
+  ]
+}

@@ -5,15 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#090d16">
 <meta name="description" content="AngelAreum · USDT 무기한 선물 차트, 구조 분석과 위험 우선 판단 도구.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>AngelAreum · Futures Terminal</title>
-<link rel="stylesheet" href="styles.css?v=5">
-<script defer src="boot.js?v=5"></script>
+<link rel="stylesheet" href="styles.css?v=6">
+<script defer src="boot.js?v=6"></script>
 <script defer src="vendor/lightweight-charts.standalone.production.js?v=4.2.0"></script>
-<script defer src="core.js?v=5"></script>
-<script defer src="market.js?v=5"></script>
-<script defer src="app-state.js?v=5"></script>
-<script defer src="chart-render.js?v=5"></script>
-<script defer src="app.js?v=5"></script>
+<script defer src="core.js?v=6"></script>
+<script defer src="market.js?v=6"></script>
+<script defer src="app-state.js?v=6"></script>
+<script defer src="chart-render.js?v=6"></script>
+<script defer src="app.js?v=6"></script>
 </head>
 <body>
 <a class="skip" href="#panel">분석 패널로 이동</a>
@@ -24,17 +27,17 @@
   <div class="connection"><span id="status" role="status" aria-live="polite">연결 준비</span><span id="lastTick">바이낸스 USDT 무기한</span></div>
 </header>
 <nav class="toolbar" aria-label="차트 도구">
-  <div class="group timeframes" id="tf" aria-label="차트 시간봉"><button data-tf="15m">15분</button><button data-tf="1h">1시간</button><button data-tf="4h">4시간</button><button data-tf="1d">일봉</button><button data-tf="1w">주봉</button></div>
+  <div class="group timeframes" id="tf" aria-label="차트 시간봉"><button data-tf="1m">1분</button><button data-tf="5m">5분</button><button data-tf="15m">15분</button><button data-tf="1h">1시간</button><button data-tf="4h">4시간</button><button data-tf="1d">일봉</button><button data-tf="1w">주봉</button></div>
   <span class="divider"></span>
   <div class="group"><button id="autoScale" aria-pressed="true" title="보이는 캔들 높이에 자동 맞춤 · A">Auto</button><button id="goLive" title="최신 캔들로 이동 · L">최신</button></div>
   <details id="layerMenu"><summary>레이어</summary><div class="menu">
     <div class="menu-heading">차트 밀도 <span>표시만 변경</span><button id="closeLayers" aria-label="레이어 닫기">닫기</button></div>
     <div class="presets" id="presets"><button data-preset="focus">집중</button><button data-preset="structure">구조</button><button data-preset="pro">전체</button></div>
     <div id="layers" class="layer-grid">
-      <label><input type="checkbox" data-layer="signals">L/S 신호</label><label><input type="checkbox" data-layer="plans">손절·익절</label><label><input type="checkbox" data-layer="sq">SQ</label><label><input type="checkbox" data-layer="trend">장기 추세선</label><label><input type="checkbox" data-layer="shortTrend">단기 추세선</label><label><input type="checkbox" data-layer="levels">상위 레벨</label><label><input type="checkbox" data-layer="sr">지지·저항</label><label><input type="checkbox" data-layer="fib">피보나치</label><label><input type="checkbox" data-layer="zone">반등 후보</label><label><input type="checkbox" data-layer="ema20">EMA 20</label><label><input type="checkbox" data-layer="ema50">EMA 50</label><label><input type="checkbox" data-layer="ema200">EMA 200</label><label><input type="checkbox" data-layer="volume">거래량</label><label><input type="checkbox" data-layer="mine">내 수평선</label>
+      <label title="마감 확정 LONG/SHORT 신호 화살표"><input type="checkbox" data-layer="signals">L/S 신호</label><label title="진행 중 계획의 손절·목표 가격선"><input type="checkbox" data-layer="plans">손절·익절</label><label title="스퀴즈(Squeeze) · 4H 변동성 압축 뒤 상방 이탈 추적"><input type="checkbox" data-layer="sq">SQ</label><label title="일봉 피벗 기준 장기 추세선"><input type="checkbox" data-layer="trend">장기 추세선</label><label title="현재 주기 피벗 기준 단기 추세선"><input type="checkbox" data-layer="shortTrend">단기 추세선</label><label title="일봉·주봉 피벗과 52봉 고저"><input type="checkbox" data-layer="levels">상위 레벨</label><label title="현재 주기의 확정 지지·저항"><input type="checkbox" data-layer="sr">지지·저항</label><label title="최근 확정 스윙의 0.5 / 0.618"><input type="checkbox" data-layer="fib">피보나치</label><label title="근거 2종류 이상이 겹치는 가격대"><input type="checkbox" data-layer="zone">반등 후보</label><label title="지수이동평균 20"><input type="checkbox" data-layer="ema20">EMA 20</label><label title="지수이동평균 50"><input type="checkbox" data-layer="ema50">EMA 50</label><label title="지수이동평균 200"><input type="checkbox" data-layer="ema200">EMA 200</label><label title="거래량 막대"><input type="checkbox" data-layer="volume">거래량</label><label title="직접 그린 수평선"><input type="checkbox" data-layer="mine">내 수평선</label><label title="ATR 대비 급락·급등과 반등·반락, 되돌림 기준선"><input type="checkbox" data-layer="shock">급변동</label><label title="볼린저 밴드 20, 2σ"><input type="checkbox" data-layer="bb">볼린저</label><label title="RSI 14 · 차트 하단 표시 · 30/70 기준선"><input type="checkbox" data-layer="rsi">RSI</label><label title="MACD 12·26·9 · 차트 하단 표시"><input type="checkbox" data-layer="macd">MACD</label><label title="세션 VWAP · KST 09:00 초기화 · 1시간봉 이하"><input type="checkbox" data-layer="vwap">VWAP</label>
     </div>
   </div></details>
-  <div class="group drawing"><button id="drawLine" title="차트를 눌러 수평선 추가 · H">수평선</button><button id="drawAlert">가격 알림</button><button id="deleteLine" title="차트에서 내 수평선을 눌러 삭제">선 삭제</button></div>
+  <div class="group drawing"><button id="drawLine" title="차트를 눌러 수평선 추가 · H">수평선</button><button id="drawTrend" title="차트에서 두 점을 눌러 추세선 추가 · T">추세선</button><button id="drawAlert">가격 알림</button><button id="deleteLine" title="차트에서 내 수평선·추세선을 눌러 삭제">선 삭제</button></div>
 </nav>
 <section id="decision" class="decision" aria-label="현재 판단"><div class="decision-main"><span class="eyebrow">CURRENT CONTEXT</span><strong id="decisionState">확인 중</strong></div><div class="decision-copy"><span id="decisionReason">마감된 일봉·4H 데이터로 분석합니다.</span><span id="decisionRisk" class="risk">위험 정보 확인 중</span></div><span class="decision-note">판단 보조 · 자동 주문 없음</span></section>
 <main>

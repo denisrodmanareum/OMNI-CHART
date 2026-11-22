@@ -52,7 +52,7 @@ class MarketClient {
     if (!Array.isArray(rows) || !rows.length) throw new Error('선물 캔들 데이터가 없습니다');
     const bars = rows.map(k=>({t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],ct:k[6]}));
     if(bars.some((b,i)=>![b.t,b.o,b.h,b.l,b.c,b.v,b.ct].every(Number.isFinite) || b.l<=0 || b.v<0 || b.ct<b.t || b.h<Math.max(b.o,b.c,b.l) || b.l>Math.min(b.o,b.c) || (i>0 && b.t<=bars[i-1].t))) throw new Error('선물 캔들 무결성 오류');
-    const step={'15m':900000,'1h':3600000,'4h':14400000,'1d':86400000,'1w':604800000}[interval];
+    const step={'1m':60000,'5m':300000,'15m':900000,'1h':3600000,'4h':14400000,'1d':86400000,'1w':604800000}[interval];
     if(step && bars.some((b,i)=>i>0 && b.t-bars[i-1].t!==step)) throw new Error('선물 캔들에 누락 구간이 있습니다 · 다시 조회하세요');
     return bars;
   }
@@ -70,6 +70,16 @@ class MarketClient {
     const values=await Promise.allSettled(paths.map(path=>this.json(path+query,signal)));
     const out={symbol,receivedAt:Date.now(),errors:[]};
     values.forEach((value,i)=>{ if(value.status==='fulfilled') out[names[i]]=value.value; else out.errors.push(names[i]); });
+    return out;
+  }
+  // 5분 단위 분위기 지표. 실패해도 기본 선물 지표에는 영향을 주지 않는다.
+  async sentiment(symbol,signal) {
+    const base='symbol='+encodeURIComponent(symbol);
+    const names=['account','taker','oiHist'];
+    const paths=['/futures/data/globalLongShortAccountRatio?'+base+'&period=5m&limit=1','/futures/data/takerlongshortRatio?'+base+'&period=5m&limit=1','/futures/data/openInterestHist?'+base+'&period=1h&limit=25'];
+    const values=await Promise.allSettled(paths.map(path=>this.json(path,signal)));
+    const out={symbol,receivedAt:Date.now(),errors:[]};
+    values.forEach((value,i)=>{ if(value.status==='fulfilled'&&Array.isArray(value.value)&&value.value.length) out[names[i]]=value.value; else out.errors.push(names[i]); });
     return out;
   }
 }
