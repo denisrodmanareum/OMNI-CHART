@@ -1,10 +1,10 @@
 "use strict";
-const {wilderAtr,ema,stopPct,dailySignals,ichiSignals,combine,runPlan,squeeze,longTrend,weekly,levelsOf,nearest,runLength,analyze,localLevels,fibAnchors,pickZone,eventBar,candleRange,candleTimeRange,tickPrecision,roundToTick,formatPrice,mergeRefreshBars,groupAxisLevels,contiguousTail}=AngelCore;
+const {wilderAtr,ema,stopPct,dailySignals,ichiSignals,combine,runPlan,squeeze,longTrend,weekly,levelsOf,nearest,runLength,analyze,localLevels,fibAnchors,pickZone,eventBar,candleRange,candleTimeRange,tickPrecision,roundToTick,formatPrice,mergeRefreshBars,groupAxisLevels,contiguousTail,rsi,bollinger,macd,vwap,shockEvents,liveShock}=AngelCore;
 const H=3600e3,H4=4*H,DAY=24*H,HOLD=72*H,MAX_STOP=10,KST=9*3600;
-const TF_SEC={'15m':900,'1h':3600,'4h':14400,'1d':86400,'1w':604800};
-const SR_PRD={'15m':8,'1h':10,'4h':12,'1d':15,'1w':15};
+const TF_SEC={'1m':60,'5m':300,'15m':900,'1h':3600,'4h':14400,'1d':86400,'1w':604800};
+const SR_PRD={'1m':8,'5m':8,'15m':8,'1h':10,'4h':12,'1d':15,'1w':15};
 const WATCH_DEFAULT=['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT'];
-const LAYER_DEFAULT={signals:true,plans:true,sq:false,trend:true,shortTrend:true,levels:true,sr:true,fib:true,zone:true,ema20:false,ema50:false,ema200:false,volume:true,mine:true};
+const LAYER_DEFAULT={signals:true,plans:true,sq:false,trend:true,shortTrend:true,levels:true,sr:true,fib:true,zone:true,ema20:false,ema50:false,ema200:false,volume:true,mine:true,shock:true,bb:false,rsi:false,macd:false,vwap:false};
 const $=id=>document.getElementById(id);
 const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const sec=t=>Math.floor(t/1000)+KST;
@@ -29,3 +29,5 @@ state.crosshairTime=null;
 state.refreshing=false;state.analysisStale=false;state.liveRevision=0;
 
 state.notices=[];
+
+state.sentiment=null;state.shockSeen='';state.reboundSeen='';

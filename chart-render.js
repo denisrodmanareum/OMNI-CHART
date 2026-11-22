@@ -14,7 +14,10 @@ function analyzeChart(now) {
   // 단기 추세선: 현재 차트 주기의 좌우 5봉 피벗으로 같은 규칙(낮아지는 고점·높아지는 저점, 종가 이탈)을 쓴다.
   // 지지·저항용 피벗(8~15봉)은 급락·급등 중에 새 쌍이 늦게 생겨 최근 흐름을 놓친다.
   const shortSup = longTrend(cb, 5, false), shortRes = longTrend(cb, 5, true);
-  return { local, fib: fibUseful ? fib : null, zone: zone && { ...zone, below: dir === -1, half: a * 0.3 }, atr: a, shortSup, shortRes };
+  // 급변동: 현재 차트 주기의 마감 봉 기준. 4H 상태는 차트 주기와 무관하게 함께 본다.
+  const shock = shockEvents(cb, tfSec * 1000);
+  const shock4 = tfSec === 14400 ? shock : shockEvents((state.data?.h4 || []).filter(b => b.ct < now), H4);
+  return { local, fib: fibUseful ? fib : null, zone: zone && { ...zone, below: dir === -1, half: a * 0.3 }, atr: a, shortSup, shortRes, shock, shock4, rsi: rsi(cb, 14).at(-1) };
 }
 
 // ---------- 차트 ----------
@@ -39,6 +42,20 @@ const stResLine = chart.addLineSeries({ ...lineOpts, color: "#ff7189", lineWidth
 const sqLine = chart.addLineSeries({ ...lineOpts, color: "#a855f7", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted });
 const srSeries = [0, 1, 2, 3].map(() => chart.addLineSeries({ ...lineOpts, lineWidth: 2, lastValueVisible: false }));
 const fibSeries = [0, 1].map(() => chart.addLineSeries({ ...lineOpts, color: "#f6ce7e", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: true }));
+const bbSeries = [0, 1].map(() => chart.addLineSeries({ ...lineOpts, color: "rgba(140,174,255,.7)", lineWidth: 1 }));
+const rsiSeries = chart.addLineSeries({ ...lineOpts, priceScaleId: "rsi", color: "#c4a5ff", lineWidth: 2, priceFormat: { type: "price", precision: 1, minMove: 0.1 }, autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) });
+const { autoscaleInfoProvider: _fixedScale, ...subLine } = lineOpts;
+const macdHist = chart.addHistogramSeries({ priceScaleId: "macd", lastValueVisible: false, priceLineVisible: false });
+const macdSeries = [["#8caeff", 2], ["#ffb86c", 1]].map(([color, lineWidth]) => chart.addLineSeries({ ...subLine, priceScaleId: "macd", color, lineWidth }));
+const vwapSeries = chart.addLineSeries({ ...lineOpts, color: "#38bdf8", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.LargeDashed });
+const trendSeries = [];
+let rsiGuides = [];
+// 하단 보조 지표는 거래량 위에 20%씩 쌓고, 그만큼 캔들 영역을 줄인다.
+function applySubPanes(names) {
+  names.forEach((name, i) => chart.priceScale(name).applyOptions({ scaleMargins: { top: 0.86 - 0.2 * (i + 1), bottom: 0.16 + 0.2 * i } }));
+  chart.priceScale("right").applyOptions({ scaleMargins: { top: 0.14, bottom: 0.15 + 0.2 * names.length + (names.length ? 0.01 : 0) } });
+}
+const macdPoint = (b, v) => ({ time: sec(b.t), value: v.hist, color: v.hist >= 0 ? "rgba(37,207,172,.55)" : "rgba(255,101,127,.55)" });
 let priceLines = [];
 let bars = [], result = null, local = null;
 let axisCandidates=[],axisLabels=[],axisFrame=null;
@@ -65,7 +82,7 @@ $('chart').addEventListener('wheel',scheduleAxisCaptions,{passive:true});
 function applyPriceFormat(meta){
   const precision=tickPrecision(meta?.tickSize)??digits(bars.at(-1).c),minMove=Number(meta?.tickSize)||10**-precision;
   const priceFormat={type:'price',precision,minMove};
-  for(const series of [candles,supLine,resLine,stSupLine,stResLine,sqLine,...srSeries,...fibSeries,...Object.values(emaSeries).map(e=>e.s)])series.applyOptions({priceFormat});
+  for(const series of [candles,supLine,resLine,stSupLine,stResLine,sqLine,...srSeries,...fibSeries,...bbSeries,vwapSeries,...trendSeries,...Object.values(emaSeries).map(e=>e.s)])series.applyOptions({priceFormat});
 }
 
 function toCandle(b) { return { time: sec(b.t), open: b.o, high: b.h, low: b.l, close: b.c }; }
@@ -80,6 +97,16 @@ function updateLiveIndicators() {
 }
 
 // 이벤트 시각 이후 첫 차트 봉에 표시한다.
+// 볼린저·RSI는 진행 중 봉을 포함해 마지막 값만 갱신한다.
+function updateLiveExtras() {
+  const last=bars.at(-1);if(!last||!state.ready) return;
+  const L=state.layers;if(!L.bb&&!L.rsi&&!L.macd&&!L.vwap) return;
+  const continuous=contiguousTail(bars,TF_SEC[state.data.timeframe]*1000),time=sec(last.t);
+  if(L.bb&&continuous.length>=20){const band=bollinger(continuous.slice(-20)).at(-1);bbSeries[0].update({time,value:band.upper});bbSeries[1].update({time,value:band.lower});}
+  if(L.rsi&&continuous.length>15){const value=rsi(continuous.slice(-300),14).at(-1);if(value!=null)rsiSeries.update({time,value});}
+  if(L.macd){const value=macd(continuous).at(-1);if(value){macdHist.update(macdPoint(last,value));macdSeries[0].update({time,value:value.macd});macdSeries[1].update({time,value:value.signal});}}
+  if(L.vwap&&TF_SEC[state.data.timeframe]<=3600)vwapSeries.update({time,value:vwap(continuous.slice(-1500)).at(-1)});
+}
 function barAt(t) { const at = eventBar(bars, t); return at == null ? null : sec(at); }
 const segment = (t1, t2, v1, v2) => t1 >= t2 ? [] : [{ time: sec(t1), value: v1 }, { time: sec(t2), value: v2 }];
 
@@ -103,6 +130,14 @@ function render() {
   if (L.trend && showDaily) for (const [tl, text, pos, color] of [[r.trendSup, "장기 지지 이탈", "aboveBar", "#ff657f"], [r.trendRes, "장기 저항 돌파", "belowBar", "#25cfac"]]) {
     if (!tl || !tl.broken) continue;
     const time = barAt(tl.breakT + DAY); if (time != null) markers.push({ time, position: pos, shape: pos === "aboveBar" ? "arrowDown" : "arrowUp", color, text });
+  }
+  local = analyzeChart(Date.now());
+  if (L.shock) for (const e of local.shock.events) {
+    const time = barAt(e.t); if (time == null) continue;
+    markers.push(e.type === "drop" ? { time, position: "aboveBar", shape: "arrowDown", color: "#ff9f43", text: `급락 ${e.mag.toFixed(1)}ATR` }
+      : e.type === "surge" ? { time, position: "belowBar", shape: "arrowUp", color: "#ffd166", text: `급등 ${e.mag.toFixed(1)}ATR` }
+      : e.type === "rebound" ? { time, position: "belowBar", shape: "circle", color: "#7dd3fc", text: "반등" }
+      : { time, position: "aboveBar", shape: "circle", color: "#fda4af", text: "반락" });
   }
   markers.sort((a, b) => a.time - b.time);
   candles.setMarkers(markers);
@@ -140,7 +175,31 @@ function render() {
   }
   volume.applyOptions({ visible: L.volume });
 
-  local = analyzeChart(Date.now());
+  // 급변동 구간이 진행 중이면 되돌림 기준 가격을 표시한다.
+  const leg = L.shock ? local.shock.leg : null;
+  if (leg) for (const [value, title] of [[leg.r382, "되돌림 38%"], [leg.r50, "되돌림 50%"], [leg.r618, "되돌림 62%"]])
+    addLine(value, "#7dd3fc", title, LightweightCharts.LineStyle.Dotted, 1, false);
+  const bands = L.bb && continuous.length >= 20 ? bollinger(continuous) : null;
+  bbSeries.forEach((s, k) => s.setData(bands ? continuous.slice(19).map((b, i) => ({ time: sec(b.t), value: k ? bands[i + 19].lower : bands[i + 19].upper })) : []));
+  const rsiValues = L.rsi && continuous.length > 15 ? rsi(continuous, 14) : null;
+  rsiSeries.setData(rsiValues ? continuous.map((b, i) => ({ time: sec(b.t), value: rsiValues[i] })).filter(p => p.value != null) : []);
+  for (const line of rsiGuides) rsiSeries.removePriceLine(line);
+  rsiGuides = rsiValues ? [70, 30].map(value => rsiSeries.createPriceLine({ price: value, color: "rgba(196,165,255,.45)", lineStyle: LightweightCharts.LineStyle.Dotted, lineWidth: 1, axisLabelVisible: false, title: `RSI ${value}` })) : [];
+  const macdValues = L.macd && continuous.length > 40 ? macd(continuous) : null;
+  const macdRows = macdValues ? continuous.map((b, i) => [b, macdValues[i]]).filter(row => row[1]) : [];
+  macdHist.setData(macdRows.map(([b, v]) => macdPoint(b, v)));
+  macdSeries[0].setData(macdRows.map(([b, v]) => ({ time: sec(b.t), value: v.macd })));
+  macdSeries[1].setData(macdRows.map(([b, v]) => ({ time: sec(b.t), value: v.signal })));
+  applySubPanes([rsiValues && "rsi", macdValues && "macd"].filter(Boolean));
+  const vwapValues = L.vwap && tfSec <= 3600 ? vwap(continuous) : null;
+  vwapSeries.setData(vwapValues ? continuous.map((b, i) => ({ time: sec(b.t), value: vwapValues[i] })) : []);
+  // 내 추세선: 두 점을 지나 최신 봉까지 연장한다.
+  const trends = L.mine ? readTrends() : [];
+  while (trendSeries.length < trends.length) trendSeries.push(chart.addLineSeries({ ...lineOpts, color: "#79bfff", lineWidth: 2, priceFormat: candles.options().priceFormat }));
+  trendSeries.forEach((s, k) => {
+    const tr = trends[k], start = tr ? eventBar(bars, Math.max(tr.t1, bars[0].t)) : null;
+    s.setData(tr && start != null ? segment(start, lastT, trendAt(tr, start), trendAt(tr, lastT)) : []);
+  });
   // 지지·저항: 2회 이상 확인된 강한 레벨은 굵은 실선, 1회 레벨은 옅은 점선으로 모두 그린다.
   const srLevels = L.sr ? local.local : [];
   axisCandidates=[...(L.levels?[near.res,near.sup].filter(Boolean).map(lv=>({p:lv.p,title:`${lv.label} ${lv.p>=px?'저항':'지지'}`})):[]),...srLevels.map(lv=>({p:lv.p,title:`${lv.p>=px?'저항':'지지'} ${lv.touches}회`}))];

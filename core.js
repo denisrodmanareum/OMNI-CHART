@@ -249,6 +249,104 @@ function pickZone(cands, px, atr, below) {
 }
 
 
+// ---------- 보조 지표 ----------
+function rsi(b, n = 14) {
+  const out = new Array(b.length).fill(null);
+  let gain = 0, loss = 0;
+  const value = () => loss === 0 ? (gain === 0 ? 50 : 100) : 100 - 100 / (1 + gain / loss);
+  for (let i = 1; i < b.length; i++) {
+    const d = b[i].c - b[i - 1].c, up = Math.max(d, 0), down = Math.max(-d, 0);
+    if (i <= n) { gain += up; loss += down; if (i === n) { gain /= n; loss /= n; out[i] = value(); } }
+    else { gain = (gain * (n - 1) + up) / n; loss = (loss * (n - 1) + down) / n; out[i] = value(); }
+  }
+  return out;
+}
+function bollinger(b, n = 20, k = 2) {
+  const out = new Array(b.length).fill(null);
+  for (let i = n - 1; i < b.length; i++) {
+    let sum = 0; for (let j = i - n + 1; j <= i; j++) sum += b[j].c;
+    const mid = sum / n;
+    let v = 0; for (let j = i - n + 1; j <= i; j++) v += (b[j].c - mid) ** 2;
+    const sd = Math.sqrt(v / n);
+    out[i] = { mid, upper: mid + k * sd, lower: mid - k * sd };
+  }
+  return out;
+}
+function macd(b, fast = 12, slow = 26, signal = 9) {
+  const f = ema(b, fast), s = ema(b, slow), line = b.map((_, i) => f[i] - s[i]);
+  const k = 2 / (signal + 1);
+  let v = null;
+  return line.map((x, i) => {
+    if (i < slow - 1) return null;
+    v = v == null ? x : x * k + v * (1 - k);
+    return i < slow + signal - 2 ? null : { macd: x, signal: v, hist: x - v };
+  });
+}
+// 세션 VWAP: UTC 00:00(KST 09:00)에 초기화하는 누적 (고+저+종)/3 × 거래량.
+function vwap(b) {
+  let day = null, pv = 0, vol = 0;
+  return b.map(x => {
+    const d = Math.floor(x.t / DAY);
+    if (d !== day) { day = d; pv = 0; vol = 0; }
+    const tp = (x.h + x.l + x.c) / 3;
+    pv += tp * x.v; vol += x.v;
+    return vol > 0 ? pv / vol : tp;
+  });
+}
+
+// ---------- 급변동(급락·급등)과 되돌림 ----------
+// 마감 봉만 사용한다. 직전 봉까지의 ATR 대비 몸통이 k배 이상이거나, 3봉 누적 이동이 k3배 이상이면 급변동.
+// 같은 방향이 이어지면 한 구간으로 묶고, 구간 폭의 retrace 이상 종가로 되돌리거나 반대 방향 급변동 봉이 나오면 반등·반락으로 확정한다.
+// 방향 신호가 아니라 변동성 경고와 되돌림 기준 가격을 제공한다.
+const SHOCK = { n: 14, k: 2.5, k3: 4, window: 12, retrace: 0.5 };
+function shockEvents(cb, step, options = {}) {
+  const { n, k, k3, window, retrace } = { ...SHOCK, ...options };
+  const atr = wilderAtr(cb, n), events = [];
+  let leg = null;
+  for (let i = n + 1; i < cb.length; i++) {
+    const b = cb[i], a = atr[i - 1];
+    if (!(a > 0)) continue;
+    if (leg && i - leg.last > window) leg = null;
+    if (leg) {
+      leg.extreme = leg.dir === -1 ? Math.min(leg.extreme, b.l) : Math.max(leg.extreme, b.h);
+      const span = Math.abs(leg.origin - leg.extreme), back = leg.dir === -1 ? b.c - leg.extreme : leg.extreme - b.c;
+      if (i > leg.last && span > 0 && back >= retrace * span) {
+        events.push({ t: b.t + step, type: leg.dir === -1 ? "rebound" : "pullback", dir: -leg.dir, mag: back / a, pct: (b.c / leg.extreme - 1) * 100, origin: leg.origin, extreme: leg.extreme });
+        leg = null;
+        continue;
+      }
+    }
+    const one = (b.c - b.o) / a, three = i >= n + 3 ? (b.c - cb[i - 2].o) / a : 0;
+    let dir = 0, mag = 0, count = 1;
+    if (Math.abs(one) >= k) { dir = Math.sign(one); mag = Math.abs(one); }
+    else if (Math.abs(three) >= k3 && Math.sign(b.c - b.o) === Math.sign(three)) { dir = Math.sign(three); mag = Math.abs(three); count = 3; }
+    if (!dir) continue;
+    if (leg && leg.dir === dir) { leg.last = i; leg.mag = Math.max(leg.mag, mag); continue; }
+    // 급변동 구간 안에서 반대 방향 급변동이 나오면 50% 되돌림 전이라도 강한 반등·반락으로 확정한다.
+    if (leg) {
+      events.push({ t: b.t + step, type: dir === 1 ? "rebound" : "pullback", dir, mag, pct: (b.c / leg.extreme - 1) * 100, origin: leg.origin, extreme: leg.extreme, strong: true });
+      leg = null;
+      continue;
+    }
+    const span = cb.slice(i - count + 1, i + 1);
+    const origin = dir === -1 ? Math.max(...span.map(x => x.h)) : Math.min(...span.map(x => x.l));
+    const extreme = dir === -1 ? Math.min(...span.map(x => x.l)) : Math.max(...span.map(x => x.h));
+    leg = { dir, origin, extreme, start: span[0].t, last: i, mag };
+    events.push({ t: b.t + step, type: dir === -1 ? "drop" : "surge", dir, mag, pct: (b.c / origin - 1) * 100, origin, extreme });
+  }
+  const last = atr.at(-1);
+  if (!leg) return { events, leg: null, atr: last, k };
+  const at = r => leg.extreme + (leg.origin - leg.extreme) * r;
+  return { events, leg: { dir: leg.dir, origin: leg.origin, extreme: leg.extreme, start: leg.start, mag: leg.mag, since: cb.length - 1 - leg.last, r382: at(0.382), r50: at(0.5), r618: at(0.618) }, atr: last, k };
+}
+// 진행 중 봉의 몸통을 마감 봉 ATR로 나눈 값. 미확정 참고용.
+function liveShock(bar, atr, k = SHOCK.k) {
+  if (!bar || !(atr > 0)) return null;
+  const mag = (bar.c - bar.o) / atr;
+  return { mag, dir: Math.abs(mag) >= k ? Math.sign(mag) : 0 };
+}
+
+
 // A marker outside loaded history must never be attached to the first candle.
 function eventBar(bars,t) {
   if (!bars.length || t < bars[0].t || t > bars.at(-1).ct) return null;
@@ -305,7 +403,7 @@ function contiguousTail(bars,step){
   let start=bars.length-1;while(start>0&&bars[start].t-bars[start-1].t===step)start--;
   return bars.slice(start);
 }
-const api={wilderAtr,ema,stopPct,dailySignals,ichiSignals,combine,runPlan,squeeze,longTrend,weekly,levelsOf,nearest,runLength,analyze,localLevels,fibAnchors,pickZone,eventBar,candleRange,candleTimeRange,tickPrecision,roundToTick,formatPrice,mergeRefreshBars,groupAxisLevels,contiguousTail};
+const api={wilderAtr,ema,stopPct,dailySignals,ichiSignals,combine,runPlan,squeeze,longTrend,weekly,levelsOf,nearest,runLength,analyze,localLevels,fibAnchors,pickZone,eventBar,candleRange,candleTimeRange,tickPrecision,roundToTick,formatPrice,mergeRefreshBars,groupAxisLevels,contiguousTail,rsi,bollinger,macd,vwap,shockEvents,liveShock,SHOCK};
 if(typeof module!=="undefined" && module.exports) module.exports=api;
 else root.AngelCore=api;
 })(typeof globalThis!=="undefined" ? globalThis : this);
