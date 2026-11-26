@@ -1,6 +1,8 @@
 /* Public Binance USD-M data only. No credentials and no order endpoints. */
 (function(root) {
 "use strict";
+// USD-M 시장 스트림 경로. 기존 /ws/ 경로는 연결만 되고 데이터가 오지 않는다(2026-11 확인).
+const FUTURES_WS = "wss://fstream.binance.com/market/ws/";
 class MarketClient {
   constructor(fetcher = (...args) => fetch(...args)) { this.fetcher = fetcher; this.cooldownUntil=0; this.throttleStrikes=0; this.symbolMeta=new Map(); this.info=null; this.infoAt=0; this.infoPromise=null; }
   cooldownError(status=429) {
@@ -53,7 +55,11 @@ class MarketClient {
     const bars = rows.map(k=>({t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],ct:k[6]}));
     if(bars.some((b,i)=>![b.t,b.o,b.h,b.l,b.c,b.v,b.ct].every(Number.isFinite) || b.l<=0 || b.v<0 || b.ct<b.t || b.h<Math.max(b.o,b.c,b.l) || b.l>Math.min(b.o,b.c) || (i>0 && b.t<=bars[i-1].t))) throw new Error('선물 캔들 무결성 오류');
     const step={'1m':60000,'5m':300000,'15m':900000,'1h':3600000,'4h':14400000,'1d':86400000,'1w':604800000}[interval];
-    if(step && bars.some((b,i)=>i>0 && b.t-bars[i-1].t!==step)) throw new Error('선물 캔들에 누락 구간이 있습니다 · 다시 조회하세요');
+    if(step){
+      let start=0;for(let i=1;i<bars.length;i++)if(bars[i].t-bars[i-1].t!==step)start=i;
+      // 오래된 누락은 그 뒤 연속 구간만 쓰고, 최근 구간이 짧아질 때만 오류로 알린다.
+      if(start>0){const tail=bars.slice(start);if(tail.length<Math.min(100,bars.length))throw new Error('선물 캔들에 누락 구간이 있습니다 · 다시 조회하세요');return tail;}
+    }
     return bars;
   }
   async snapshot(symbol,timeframe,signal) {
@@ -116,7 +122,7 @@ class Selection {
   connect(data,callbacks,Socket=WebSocket) {
     if(!this.current(data)) return;
     this.stopSocket();
-    const ws=this.socket=new Socket(`wss://fstream.binance.com/ws/${data.symbol.toLowerCase()}@kline_${data.timeframe}`);
+    const ws=this.socket=new Socket(`${FUTURES_WS}${data.symbol.toLowerCase()}@kline_${data.timeframe}`);
     const active=()=>this.current(data) && this.socket===ws;
     ws.onopen=()=>{if(active()) callbacks.open?.();};
     ws.onmessage=event=>{
@@ -134,6 +140,6 @@ class Selection {
     ws.onerror=()=>{if(active()) callbacks.error?.('실시간 연결 확인 중');};
   }
 }
-const api={MarketClient,Selection};
+const api={MarketClient,Selection,FUTURES_WS};
 if(typeof module!=='undefined' && module.exports) module.exports=api; else root.AngelMarket=api;
 })(typeof globalThis!=='undefined' ? globalThis : this);

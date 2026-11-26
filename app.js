@@ -41,10 +41,13 @@ function updateSummary() {
   const activeSides=new Set(active.map(p=>p.dir));
   const unsafe=conflict || activeSides.size>1;
   const stale=Date.now()-state.lastTick>30000;
-  const label=stale?'시세 확인':state.analysisStale?'분석 확인':!active.length || unsafe?'WAIT':active[0].dir===1?'LONG 관찰':'SHORT 관찰';
+  const px=bars.at(-1).c;
+  const stopHit=active.some(p=>p.dir===1?px<=p.sl:px>=p.sl), targetHit=active.some(p=>p.dir===1?px>=p.tp:px<=p.tp);
+  const touched=stopHit?'손절 도달 · 마감 확인':targetHit?'목표 도달 · 마감 확인':'';
+  const label=stale?'시세 확인':state.analysisStale?'분석 확인':!active.length || unsafe?'WAIT':touched||(active[0].dir===1?'LONG 관찰':'SHORT 관찰');
   $('decisionState').textContent=label;
-  $('decisionState').style.color=stale||state.analysisStale||label==='WAIT'?'var(--gold)':active[0].dir===1?'var(--long)':'var(--short)';
-  $('decisionReason').textContent=stale?'가격 수신 지연 · 마지막 가격으로 판단하지 마세요':state.analysisStale?'분석 갱신 지연 · 마지막 확정 결과 유지 · 재시도 중':unsafe?'일봉과 4H 방향 충돌 · 신규 진입 대기':!active.length?'진행 중 계획 없음 · 다음 확정 신호를 기다리는 구간':'마감 확정 계획 추적 중 · 현재 가격의 신규 진입 신호가 아닙니다';
+  $('decisionState').style.color=stale||state.analysisStale||label==='WAIT'||touched?'var(--gold)':active[0].dir===1?'var(--long)':'var(--short)';
+  $('decisionReason').textContent=stale?'가격 수신 지연 · 마지막 가격으로 판단하지 마세요':state.analysisStale?'분석 갱신 지연 · 마지막 확정 결과 유지 · 재시도 중':unsafe?'일봉과 4H 방향 충돌 · 신규 진입 대기':touched?'가격이 계획선에 닿음 · 결과는 4H 마감 기준으로 확정 · 신규 진입 판단 금지':!active.length?'진행 중 계획 없음 · 다음 확정 신호를 기다리는 구간':'마감 확정 계획 추적 중 · 현재 가격의 신규 진입 신호가 아닙니다';
   const stopText=value=>value==null?'—':`${value.toFixed(1)}%${value>MAX_STOP?' (10% 상한 초과 · 신호 제외)':''}`;
   const shockNote=shockBanner();
   $('decisionRisk').textContent=(shockNote?shockNote+' · ':'')+(active.length?active.map(p=>`${p.mod} 손절 ${price(p.sl)} · 현재가 대비 ${sgn(pct(p.sl,bars.at(-1).c))}%`).join(' / '):`다음 신호 손절폭 참고 · 일봉 ${stopText(result.stopDaily)} / 4H ${stopText(result.stopIchi)}`);
@@ -371,7 +374,7 @@ async function loadFutures() {
 }
 // ---------- 강제 청산 스트림 (접속 이후 수신분만 집계) ----------
 let liqSocket=null,liqTimer=null;
-const liq={symbol:'',since:0,events:[]};
+const liq={symbol:'',since:0,events:[],open:false};
 function connectLiquidations(){
   clearTimeout(liqTimer);
   if(liqSocket){liqSocket.onmessage=liqSocket.onclose=liqSocket.onerror=null;liqSocket.close();liqSocket=null;}
@@ -379,7 +382,9 @@ function connectLiquidations(){
   const symbol=state.data.symbol;
   if(liq.symbol!==symbol){liq.symbol=symbol;liq.since=Date.now();liq.events=[];}
   try{
-    const ws=liqSocket=new WebSocket(`wss://fstream.binance.com/ws/${symbol.toLowerCase()}@forceOrder`);
+    const ws=liqSocket=new WebSocket(`${AngelMarket.FUTURES_WS}${symbol.toLowerCase()}@forceOrder`);
+    liq.open=false;
+    ws.onopen=()=>{if(liqSocket===ws){liq.open=true;renderLiquidations();}};
     ws.onmessage=event=>{
       try{
         const o=JSON.parse(event.data).o;if(!o||o.s!==liq.symbol)return;
@@ -390,13 +395,13 @@ function connectLiquidations(){
         renderLiquidations();
       }catch{}
     };
-    ws.onclose=()=>{if(liqSocket===ws){liqSocket=null;liqTimer=setTimeout(connectLiquidations,30000);}};
+    ws.onclose=()=>{if(liqSocket===ws){liqSocket=null;liq.open=false;renderLiquidations();liqTimer=setTimeout(connectLiquidations,30000);}};
   }catch{}
 }
 function renderLiquidations(){
   const box=$('liqBox');if(!box||liq.symbol!==state.data?.symbol)return;
   const sum=(side,since=0)=>liq.events.filter(e=>e.side===side&&e.t>=since).reduce((s,e)=>s+e.usd,0),recent=Date.now()-300000;
-  if(!liq.events.length){box.className='muted';box.textContent=`수신 없음 · ${clock(liq.since)}부터 수집`;return;}
+  if(!liq.events.length){box.className='muted';box.textContent=liq.open?`수신 없음 · ${clock(liq.since)}부터 수집`:'청산 스트림 연결 중 · 집계 안 됨';return;}
   box.className='';
   box.innerHTML=`<span class="S">롱 청산 ${usd(sum('long'))}</span> / <span class="L">숏 청산 ${usd(sum('short'))}</span> USDT<br><span class="muted">최근 5분 롱 ${usd(sum('long',recent))} / 숏 ${usd(sum('short',recent))} · ${clock(liq.since)}부터</span>`;
 }

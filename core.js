@@ -13,12 +13,21 @@ function wilderAtr(b, n) {
   }
   return out;
 }
-function ema(b, n) { const k = 2 / (n + 1); let v = null; return b.map(x => (v = v == null ? x.c : x.c * k + v * (1 - k))); }
+// Pine ta.ema와 같이 첫 n봉 단순평균으로 시작한다. 그 전 값은 null이다.
+function ema(b, n) {
+  const k = 2 / (n + 1); let v = null, sum = 0;
+  return b.map((x, i) => {
+    if (i < n - 1) { sum += x.c; return null; }
+    v = i === n - 1 ? (sum + x.c) / n : x.c * k + v * (1 - k);
+    return v;
+  });
+}
 const stopPct = (atr, close) => Math.max(0.7, 2 * atr / close * 100);
 
 function dailySignals(d) {
   const atr = wilderAtr(d, 14), out = [], sides = [];
-  let prev = 0;
+  // 계산 가능한 첫 봉은 직전 방향을 모르므로 신호를 내지 않는다(신규 상장 코인의 가짜 전환 방지).
+  let prev = null;
   for (let i = 0; i < d.length; i++) {
     let s = 0;
     if (i >= 30) {
@@ -26,11 +35,11 @@ function dailySignals(d) {
       s = r7 > 0 && r30 > 0 ? 1 : r7 < 0 && r30 < 0 ? -1 : 0;
     }
     sides.push(s);
-    if (s && s !== prev && atr[i]) {
+    if (s && prev !== null && s !== prev && atr[i]) {
       const stop = stopPct(atr[i], d[i].c);
       if (stop <= MAX_STOP) out.push({ t: d[i].t + DAY, dir: s, stop, mod: "일봉" });
     }
-    prev = s;
+    if (i >= 30) prev = s;
   }
   return { out, sides, stopNow: atr.at(-1) ? stopPct(atr.at(-1), d.at(-1).c) : null };
 }
@@ -38,11 +47,11 @@ function dailySignals(d) {
 function ichiSignals(h4) {
   const atr = wilderAtr(h4, 14), out = [];
   const mid = (i, n) => { let hi = -Infinity, lo = Infinity; for (let k = i - n + 1; k <= i; k++) { hi = Math.max(hi, h4[k].h); lo = Math.min(lo, h4[k].l); } return (hi + lo) / 2; };
-  let prev = 0, side = 0;
+  let prev = null, side = 0;
   for (let i = 25; i < h4.length; i++) {
     const tk = mid(i, 9), kj = mid(i, 26);
     side = tk > kj ? 1 : tk < kj ? -1 : 0;
-    if (side && side !== prev && atr[i]) {
+    if (side && prev !== null && side !== prev && atr[i]) {
       const stop = stopPct(atr[i], h4[i].c);
       if (stop <= MAX_STOP) out.push({ t: h4[i].t + H4, dir: side, stop, mod: "4H" });
     }
@@ -275,11 +284,13 @@ function bollinger(b, n = 20, k = 2) {
 function macd(b, fast = 12, slow = 26, signal = 9) {
   const f = ema(b, fast), s = ema(b, slow), line = b.map((_, i) => f[i] - s[i]);
   const k = 2 / (signal + 1);
-  let v = null;
+  let v = null, sum = 0, count = 0;
   return line.map((x, i) => {
     if (i < slow - 1) return null;
-    v = v == null ? x : x * k + v * (1 - k);
-    return i < slow + signal - 2 ? null : { macd: x, signal: v, hist: x - v };
+    count++;
+    if (count < signal) { sum += x; return null; }
+    v = count === signal ? (sum + x) / signal : x * k + v * (1 - k);
+    return { macd: x, signal: v, hist: x - v };
   });
 }
 // 세션 VWAP: UTC 00:00(KST 09:00)에 초기화하는 누적 (고+저+종)/3 × 거래량.
